@@ -1,7 +1,7 @@
 External OAuth Authentication for CouchDB
 =========================================
 
-This is a rewrite of the couchdb-facebook authentication module in a more generic manner allowing other systems (e.g. Twitter) to be easily added. In addition the code is designed to be utilise the _\_users_ database in a similar manner to the CouchDB 1.2 OAuth code allowing a single user to be authenticated in a number of different ways. Because of this change, this code is NOT COMPATIBLE with the couchdb-facebook code.
+This is a rewrite of the couchdb-facebook authentication module in a more generic manner allowing other systems (e.g. Twitter) to be easily added. In addition the code is designed to utilise the _\_users_ database in a similar manner to the CouchDB 1.2 OAuth code allowing a single user to be authenticated in a number of different ways. Because of this change, this code is NOT COMPATIBLE with the couchdb-facebook code.
 
 This version has been tested against CouchDB 1.2.x
 
@@ -129,7 +129,7 @@ Adding a section to an existing user document that contains the *facebook* secti
 License
 ---------------
 
-  CouchDB-Facebook Authentication is licensed under: Apache License Version 2.0, January 2004 http://www.apache.org/licenses/
+  CouchDB:XO\_Auth is licensed under: Apache License Version 2.0, January 2004 http://www.apache.org/licenses/
 
   Copyright (c) 2012 Ocasta Labs Ltd.
 
