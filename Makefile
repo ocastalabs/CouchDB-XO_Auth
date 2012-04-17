@@ -7,6 +7,7 @@ any: compile
 
 install:
 	sudo cp fb_auth.beam $(COUCHDB_ERLANG_LIB)/ebin
+	sudo cp twitter_auth.beam $(COUCHDB_ERLANG_LIB)/ebin
 	sudo cp xo_auth.beam $(COUCHDB_ERLANG_LIB)/ebin
 	
 	sudo cp xo_auth.ini $(COUCHDB_LOCALD)
@@ -17,6 +18,7 @@ install:
 compile:clean
 	erlc -I $(COUCHDB_ERLANG_LIB)/include xo_auth.erl
 	erlc -I $(COUCHDB_ERLANG_LIB)/include fb_auth.erl
+	erlc -I $(COUCHDB_ERLANG_LIB)/include twitter_auth.erl
 
 clean:
 	rm -f *.beam
