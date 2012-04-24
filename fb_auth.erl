@@ -36,7 +36,7 @@ handle_facebook_access_token(Req, ClientID, ClientSecret, AccessToken) ->
                                 {ok, Name} ->
                                     ?LOG_DEBUG("User doc ~p created for facebook id ~p", [Name, ID]),
                                     % Finally send a response that includes the AuthSession cookie
-                                    xo_auth:generate_cookied_response_json(?l2b(Name), Req);
+                                    generate_cookied_response_json(?l2b(Name), Req);
                     
                                 Error ->
                                     ?LOG_DEBUG("Non-success from create_user_doc call: ~p", [Error]),
@@ -53,7 +53,7 @@ handle_facebook_access_token(Req, ClientID, ClientSecret, AccessToken) ->
                                         {ok, Name} ->
                                             ?LOG_DEBUG("User doc ~p created for facebook id ~p", [Name, ID]),
                                             % Finally send a response that includes the AuthSession cookie
-                                            xo_auth:generate_cookied_response_json(?l2b(Name), Req);
+                                            generate_cookied_response_json(?l2b(Name), Req);
                     
                                         Error ->
                                             ?LOG_DEBUG("Non-success from create_user_doc call: ~p", [Error]),
@@ -96,7 +96,7 @@ handle_facebook_access_token(Req, ClientID, ClientSecret, AccessToken) ->
                                     end
                             end
                     end,
-                    xo_auth:generate_cookied_response_json(Name, Req);
+                    generate_cookied_response_json(Name, Req);
                     
                 {error, Reason} ->
                     couch_httpd:send_json(Req, 403, [], {[{<<"xo_auth">>, Reason}]})
@@ -225,3 +225,7 @@ process_access_token_extension(Resp) ->
             ?LOG_DEBUG("process_access_token_extension: non 200 response of: ~p", [Resp]),
             {error, "Non 200 response from facebook"}
     end.
+
+generate_cookied_response_json(Name, Req) ->
+    RedirectUri = couch_config:get("fb", "client_app_uri", nil),
+    xo_auth:generate_cookied_response_json(Name, Req, RedirectUri).
