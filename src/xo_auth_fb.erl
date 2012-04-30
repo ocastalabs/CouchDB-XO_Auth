@@ -1,8 +1,6 @@
--module(fb_auth).
-
+-module(xo_auth_fb).
 -export([handle_fb_req/1]).
-
--include("couch_db.hrl").
+-include_lib("couch/include/couch_db.hrl").
 
 % This module handles Facebook signin and _user document creation.
 % The handle_fb_req should be configured to a URI that is passed to Facebook as the

@@ -7,8 +7,7 @@
 -export([update_access_token/3]).
 -export([update_access_token/4]).
 
-
--include("couch_db.hrl").
+-include_lib("couch/include/couch_db.hrl").
 -include("xo_auth.hrl").
 
 -define(XO_DDOC_ID, <<"_design/xo_auth">>).

@@ -1,8 +1,6 @@
--module(twitter_auth).
-
+-module(xo_auth_twitter).
 -export([handle_twitter_req/1]).
-
--include("couch_db.hrl").
+-include_lib("couch/include/couch_db.hrl").
 
 % This module handles Twitter signin and _user document creation.
 % The handle_twitter_req should be configured to a URI that is passed to Twitter as the
