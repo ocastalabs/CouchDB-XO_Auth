@@ -61,7 +61,7 @@ check_user_database(ServiceName, ID) ->
     Result.
 
 create_user_doc(Username, ServiceName, ServiceID) ->
-    create_user_doc(Username, ServiceName, ServiceID, [], []),
+    create_user_doc(Username, ServiceName, ServiceID, [], []).
 
 create_user_doc(Username, ServiceName, ServiceID, AccessToken, AccessTokenSecret) ->
 
@@ -101,7 +101,7 @@ create_user_doc(Username, ServiceName, ServiceID, AccessToken, AccessTokenSecret
              {?l2b("type"), ?l2b("user")}
             ]}
      },
-                                                % See above for Validation reasoning
+    %% See above for Validation reasoning
     DbWithoutValidationFunc = Db#db{ validate_doc_funs=[] },
     Result = case couch_db:update_doc(DbWithoutValidationFunc, NewDoc, []) of
                  {ok, _} ->
@@ -112,45 +112,25 @@ create_user_doc(Username, ServiceName, ServiceID, AccessToken, AccessTokenSecret
     couch_db:close(Db),
     Result.
 
-update_access_token(DocID, ServiceName, AccessToken, AccessTokenSecret) ->
-    Db = open_auth_db(),
-
-                                                % Update a _users record with a new access key
-    try
-        case (catch couch_db:open_doc(Db, DocID, [ejson_body])) of
-            {ok, Doc} ->
-                {DocBody} = Doc#doc.body,
-                ?LOG_DEBUG("User doc ~p exists.", [DocID]),
-                {ServiceDetails} = couch_util:get_value(ServiceName, DocBody, []),
-                ?LOG_DEBUG("Extracted Service Details ~p", [ServiceDetails]),
-
-                ServiceDetails1 = ?replace(ServiceDetails, ?ACCESS_TOKEN, ?l2b(AccessToken)),
-                ServiceDetails2 = {?replace(ServiceDetails1, ?ACCESS_TOKEN_SECRET, ?l2b(AccessTokenSecret))},
-                ?LOG_DEBUG("Updated Service Details ~p", [ServiceDetails2]),
-
-                NewDocBody = ?replace(DocBody, ServiceName, ServiceDetails2),
-                ?LOG_DEBUG("Updated Body ~p", [NewDocBody]),
-
-                                                % To prevent the validation functions for the db taking umbridge at our
-                                                % behind the scenes twiddling, we blank them out.
-                                                % NOTE: Potentially fragile. Possibly dangerous?
-                DbWithoutValidationFunc = Db#db{ validate_doc_funs=[] },
-                couch_db:update_doc(DbWithoutValidationFunc, Doc#doc{body = {NewDocBody}}, []);
-            _ ->
-                ?LOG_DEBUG("No doc found for Doc ID ~p.", [DocID]),
-                nil
-        end
-    catch throw:conflict ->
-                                                % Shouldn't happen but you can never be too careful
-            ?LOG_ERROR("Conflict error when updating user document ~p.", [DocID])
-    after
-        couch_db:close(Db)
-    end.
-
 update_access_token(DocID, ServiceName, AccessToken) ->
+    ServiceDetailsUpdater =
+        fun(ServiceDetails) ->
+                ?replace(ServiceDetails, ?ACCESS_TOKEN, ?l2b(AccessToken))
+        end,
+    update_access_token_with_details(DocID, ServiceName, ServiceDetailsUpdater).
+
+update_access_token(DocID, ServiceName, AccessToken, AccessTokenSecret) ->
+    ServiceDetailsUpdater = 
+        fun(ServiceDetails) ->
+                ServiceDetails1 = ?replace(ServiceDetails, ?ACCESS_TOKEN, ?l2b(AccessToken)),
+                ?replace(ServiceDetails1, ?ACCESS_TOKEN_SECRET, ?l2b(AccessTokenSecret))
+        end,
+    update_access_token_with_details(DocID, ServiceName, ServiceDetailsUpdater).
+
+update_access_token_with_details(DocID, ServiceName, ServiceDetailsUpdater) ->
     Db = open_auth_db(),
 
-                                                % Update a _users record with a new access key
+    %% Update a _users record with a new access key
     try
         case (catch couch_db:open_doc(Db, DocID, [ejson_body])) of
             {ok, Doc} ->
@@ -159,13 +139,13 @@ update_access_token(DocID, ServiceName, AccessToken) ->
                 {ServiceDetails} = couch_util:get_value(ServiceName, DocBody, []),
                 ?LOG_DEBUG("Extracted Service Details ~p", [ServiceDetails]),
 
-                ServiceDetails1 = {?replace(ServiceDetails, ?ACCESS_TOKEN, ?l2b(AccessToken))},
+                ServiceDetails1 = {ServiceDetailsUpdater(ServiceDetails)},
                 ?LOG_DEBUG("Updated Service Details ~p", [ServiceDetails1]),
 
                 NewDocBody = ?replace(DocBody, ServiceName, ServiceDetails1),
                 ?LOG_DEBUG("Updated Body ~p", [NewDocBody]),
                 
-                %% To prevent the validation functions for the db taking umbridge at our
+                %% To prevent the validation functions for the db taking umbrage at our
                 %% behind the scenes twiddling, we blank them out.
                 %% NOTE: Potentially fragile. Possibly dangerous?
                 DbWithoutValidationFunc = Db#db{ validate_doc_funs=[] },
