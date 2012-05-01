@@ -62,10 +62,10 @@ check_user_database(ServiceName, ID) ->
         couch_db:close(Db)
     end.
 
-create_user_doc(Username, ServiceName, ServiceID) ->
-    create_user_doc(Username, ServiceName, ServiceID, [], []).
+create_user_doc(Username, ServiceName, UserID) ->
+    create_user_doc(Username, ServiceName, UserID, [], []).
 
-create_user_doc(Username, ServiceName, ServiceID, AccessToken, AccessTokenSecret) ->
+create_user_doc(Username, ServiceName, UserID, AccessToken, AccessTokenSecret) ->
 
     %% Create user auth doc with access token
     TrimmedName = re:replace(Username, "[^A-Za-z0-9_-]", "", [global, {return, list}]),
@@ -82,12 +82,12 @@ create_user_doc(Username, ServiceName, ServiceID, AccessToken, AccessTokenSecret
         ServiceDetails = case AccessTokenSecret of
                              [] ->
                                  {[
-                                   {<<"id">>, ServiceID},
+                                   {<<"id">>, UserID},
                                    {<<"access_token">>, ?l2b(AccessToken)}]};
 
                              Secret ->
                                  {[
-                                   {<<"id">>, ServiceID},
+                                   {<<"id">>, UserID},
                                    {<<"access_token">>, ?l2b(AccessToken)},
                                    {<<"access_token_secret">>, ?l2b(Secret)}]}
                          end,

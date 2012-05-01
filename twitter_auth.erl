@@ -104,11 +104,11 @@ handle_twitter_callback(Req, RequestToken, Verifier) ->
                     case couch_config:get("twitter", "store_access_token", "false") of
                         "false" ->
                             xo_auth:create_user_doc_response(
-                              Req, UserID, "Twitter", RedirectUri, 
+                              Req, UserID, "twitter", RedirectUri, 
                               xo_auth:create_user_doc(ScreenName, <<"twitter">>, ?l2b(UserID)));
                         _ ->    
                             xo_auth:create_user_doc_response(
-                              Req, UserID, "Twitter", RedirectUri,
+                              Req, UserID, "twitter", RedirectUri,
                               xo_auth:create_user_doc(ScreenName, <<"twitter">>, ?l2b(UserID), AccessToken, AccessTokenSecret))
                     end;
                     
@@ -122,7 +122,7 @@ handle_twitter_callback(Req, RequestToken, Verifier) ->
                             xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
                         _ ->
                             OldAccessToken = couch_util:get_value(<<"access_token">>, Result, []),
-                            xo_auth:update_access_token(DocID, <<"facebook">>, OldAccessToken, ?l2b(AccessToken), ?l2b(AccessTokenSecret)),
+                            xo_auth:update_access_token(DocID, <<"twitter">>, OldAccessToken, ?l2b(AccessToken), ?l2b(AccessTokenSecret)),
                             xo_auth:generate_cookied_response_json(Name, Req, RedirectUri)
                     end;
                     
