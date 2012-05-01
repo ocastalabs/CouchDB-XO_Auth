@@ -101,7 +101,7 @@ handle_twitter_callback(Req, RequestToken, Verifier) ->
             case xo_auth:check_user_database(<<"twitter">>, ?l2b(UserID)) of
                 nil ->
                     ?LOG_DEBUG("Nothing found for Twitter ID: ~p", [UserID]),
-                    case c1ouch_config:get("twitter", "store_access_token", "false") of
+                    case couch_config:get("twitter", "store_access_token", "false") of
                         "false" ->
                             xo_auth:create_user_doc_response(
                               Req, UserID, "Twitter", RedirectUri, 
