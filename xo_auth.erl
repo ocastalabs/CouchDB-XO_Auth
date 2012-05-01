@@ -144,19 +144,19 @@ update_access_token(DocID, ServiceName, _OldAccessToken, AccessToken, AccessToke
                 ?LOG_DEBUG("Extracted Service Details ~p", [ServiceDetails]),
 
                 %% Update values that are not empty
-                ServiceDetails1 = lists:foldl(fun({_Key, <<>>}, Acc) ->
-                                                      Acc;
-                                                 ({Key, Value}, Acc) ->
-                                                      ?replace(Acc, Key, Value)
-                                              end,
-                                              ServiceDetails,
-                                              [{?ACCESS_TOKEN, AccessToken},
-                                               {?ACCESS_TOKEN_SECRET, AccessTokenSecret}]),
+                ServiceDetails1 = {lists:foldl(fun({_Key, <<>>}, Acc) ->
+                                                       Acc;
+                                                  ({Key, Value}, Acc) ->
+                                                       ?replace(Acc, Key, Value)
+                                               end,
+                                               ServiceDetails,
+                                               [{?ACCESS_TOKEN, AccessToken},
+                                                {?ACCESS_TOKEN_SECRET, AccessTokenSecret}])},
 
                 ?LOG_DEBUG("Updated Service Details ~p", [ServiceDetails1]),
 
                 NewDocBody = ?replace(DocBody, ServiceName, ServiceDetails1),
-                ?LOG_DEBUG("Updated Body ~p", [NewDocBody]),
+                ?LOG_DEBUG("Updated Body: ~p", [NewDocBody]),
                 
                 %% To prevent the validation functions for the db taking umbrage at our
                 %% behind the scenes twiddling, we blank them out.

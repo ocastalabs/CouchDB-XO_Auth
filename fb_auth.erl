@@ -158,8 +158,9 @@ process_facebook_access_token(Resp) ->
     %% Extract the info we need
     case Resp of 
         {ok, "200", _, Body} ->
-            case string:tokens(Body, "=") of
-                ["access_token", AccessToken] ->
+            Props = url_decode(Body),
+            case lists:keyfind("access_token", 1, Props) of
+                {_, AccessToken} ->
                     ?LOG_DEBUG("process_facebook_access_token: access_token=~p",[AccessToken]),
                     {ok, AccessToken};
                 _ ->
@@ -188,8 +189,9 @@ process_access_token_extension(Resp) ->
     %% Extract the info we need
     case Resp of 
         {ok, "200", _, Body} ->
-            case string:tokens(Body, "=") of
-                ["access_token", NewAccessToken] ->
+            Props = url_decode(Body),
+            case lists:keyfind("access_token", 1, Props) of
+                {_, NewAccessToken} ->
                     ?LOG_DEBUG("process_access_token_extension: access_token=~p",[NewAccessToken]),
                     {ok, NewAccessToken};
                 _ ->
@@ -200,4 +202,12 @@ process_access_token_extension(Resp) ->
             ?LOG_DEBUG("process_access_token_extension: non 200 response of: ~p", [Resp]),
             {error, "Non 200 response from facebook"}
     end.
+
+url_decode(Body) ->
+    Pairs = string:tokens(Body, "&"),
+    lists:map(fun(Pair) ->
+                      [Key, Value] = string:tokens(Pair, "="),
+                      {Key, Value}
+              end,
+              Pairs).
 
