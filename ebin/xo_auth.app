@@ -1,9 +1,0 @@
-{application,xo_auth,
-             [{description,[]},
-              {vsn,"1"},
-              {registered,[]},
-              {applications,[kernel,stdlib]},
-              {mod,{xo_auth_app,[]}},
-              {env,[]},
-              {modules,[fb_auth,twitter_auth,xo_auth,xo_auth_app,
-                        xo_auth_sup]}]}.
