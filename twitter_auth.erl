@@ -4,28 +4,28 @@
 
 -include("couch_db.hrl").
 
-% This module handles Twitter signin and _user document creation.
-% The handle_twitter_req should be configured to a URI that is passed to Twitter as the
-% oauth_callback parmeter on the initial request to https://api.twitter.com/oauth/request_token
-%
+%% This module handles Twitter signin and _user document creation.
+%% The handle_twitter_req should be configured to a URI that is passed to Twitter as the
+%% oauth_callback parmeter on the initial request to https://api.twitter.com/oauth/request_token
+%%
 
 -define(COOKIE_NAME, "xo_tracker").
   
 %% Exported functions
 handle_twitter_req(#httpd{method='GET'}=Req) ->
-    % Did we get a 'code' or 'error' back from twitter?
+    %% Did we get a 'code' or 'error' back from twitter?
     case couch_httpd:qs_value(Req, "oauth_token") of
         undefined ->
             case couch_httpd:qs_value(Req, "denied") of
                 undefined ->
-                    % If there's no token and no denied value then assume this is the inital request
+                    %% If there's no token and no denied value then assume this is the inital request
                     request_twitter_request_token(Req);
                 _ ->
                     couch_httpd:send_json(Req, 403, [], {[{error, <<"User denied Needz access to Twitter account">>}]})
                 end;
                 
         RequestToken -> 
-            % If there's a token and verifier then Twitter has authenticated the user
+            %% If there's a token and verifier then Twitter has authenticated the user
             case couch_httpd:qs_value(Req, "oauth_verifier") of
                 undefined ->
                     ?LOG_DEBUG("No verifier found on Twitter callback: ~p", [Req]),
@@ -39,7 +39,7 @@ handle_twitter_req(Req) ->
 
 
 request_twitter_request_token(Req) ->
-    % Extract required values from config ini
+    %% Extract required values from config ini
     [CallbackUrl, ConsumerKey, ConsumerSecret] = lists:map(fun(K) ->
                                       case couch_config:get("twitter", K, undefined) of
                                           undefined -> throw({missing_config_value, "Cannot find key '"++K++"' in [twitter] section of config"});
@@ -63,7 +63,7 @@ request_twitter_request_token(Req) ->
     end.
 
 process_request_token_response(Req, Response) ->
-    % Extract Request Token from body and generate authenticate URL
+    %% Extract Request Token from body and generate authenticate URL
     case Response of 
         {ok, "200", _, Body} ->
             RequestParams = uri_params_decode(Body),
@@ -73,10 +73,10 @@ process_request_token_response(Req, Response) ->
             AuthenticateUrl = "https://api.twitter.com/oauth/authenticate?oauth_token="++RequestToken,
             ?LOG_DEBUG("obtain_twitter_request_token - redirecting to ~p", [AuthenticateUrl]),
 
-            % Redirect the client to the Twitter Oauth page
-            % We will need the token secret twitter just gave us when
-            % trying to get an access_token so we need to put it
-            % in a cookie.
+            %% Redirect the client to the Twitter Oauth page
+            %% We will need the token secret twitter just gave us when
+            %% trying to get an access_token so we need to put it
+            %% in a cookie.
             {ok, AuthenticateUrl, [token_cookie(Req, RequestSecret)]};
                 
     _ ->
@@ -86,7 +86,7 @@ process_request_token_response(Req, Response) ->
     
 
 handle_twitter_callback(Req, RequestToken, Verifier) ->
-    % Extract required values from config ini
+    %% Extract required values from config ini
     [ConsumerKey, ConsumerSecret] = lists:map(fun(K) ->
                                       case couch_config:get("twitter", K, undefined) of
                                           undefined -> throw({missing_config_value, "Cannot find key '"++K++"' in [twitter] section of config"});
@@ -104,25 +104,20 @@ handle_twitter_callback(Req, RequestToken, Verifier) ->
 
     case process_twitter_access_token_response(Resp) of   
         {ok, AccessToken, AccessTokenSecret, ScreenName, UserID} ->
+            RedirectUri = couch_config:get("twitter", "client_app_uri", nil),
+            
             case xo_auth:check_user_database(<<"twitter">>, ?l2b(UserID)) of
                 nil ->
                     ?LOG_DEBUG("Nothing found for Twitter ID: ~p", [UserID]),
-                    CreateResult = case couch_config:get("twitter", "store_access_token", "false") of
+                    case c1ouch_config:get("twitter", "store_access_token", "false") of
                         "false" ->
-                            xo_auth:create_user_doc(ScreenName, <<"twitter">>, ?l2b(UserID));
-                        _Else ->
-                            xo_auth:create_user_doc(ScreenName, <<"twitter">>, ?l2b(UserID), AccessToken, AccessTokenSecret)
-                        end,
-                            
-                    case CreateResult of
-                        {ok, Name} ->
-                            ?LOG_DEBUG("User doc ~p created for Twitter id ~p", [Name, UserID]),
-                            % Send a response that includes the AuthSession cookie
-                            generate_cookied_response_json(?l2b(Name), Req);
-                    
-                        Error ->
-                            ?LOG_DEBUG("Non-success from create_user_doc call: ~p", [Error]),
-                            couch_httpd:send_json(Req, 403, [], {[{error, <<"Unable to update doc">>}]})
+                            xo_auth:create_user_doc_response(
+                              Req, UserID, "Twitter", RedirectUri, 
+                              xo_auth:create_user_doc(ScreenName, <<"twitter">>, ?l2b(UserID)));
+                        _ ->    
+                            xo_auth:create_user_doc_response(
+                              Req, UserID, "Twitter", RedirectUri,
+                              xo_auth:create_user_doc(ScreenName, <<"twitter">>, ?l2b(UserID), AccessToken, AccessTokenSecret))
                     end;
                     
                 {Result} ->
@@ -132,21 +127,12 @@ handle_twitter_callback(Req, RequestToken, Verifier) ->
                     
                     case couch_config:get("twitter", "store_access_token", "false") of
                         "false" ->
-                            nil;
-                            
-                        _Else ->
+                            xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
+                        _ ->
                             OldAccessToken = couch_util:get_value(<<"access_token">>, Result, []),
-                            
-                            case string:equal(?l2b(AccessToken), OldAccessToken) of
-                                true -> 
-                                    ?LOG_DEBUG("Access tokens identical", []),
-                                    ok;
-                                false->
-                                    ?LOG_DEBUG("New access token received.", []),
-                                    xo_auth:update_access_token(DocID, <<"twitter">>, AccessToken, AccessTokenSecret)
-                            end
-                    end,
-                    generate_cookied_response_json(Name, Req);
+                            xo_auth:update_access_token(DocID, <<"facebook">>, OldAccessToken, ?l2b(AccessToken), ?l2b(AccessTokenSecret)),
+                            xo_auth:generate_cookied_response_json(Name, Req, RedirectUri)
+                    end;
                     
                 {error, Reason} ->
                     couch_httpd:send_json(Req, 403, [], {[{<<"xo_auth">>, Reason}]})
@@ -173,8 +159,8 @@ get_token_secret_from_cookie(#httpd{mochi_req=MochiReq}=Req) ->
     end.   
     
 process_twitter_access_token_response(Response) ->
-    % The response should contain everything we need
-    % access_token, access_token_secret, user_id and screen name
+    %% The response should contain everything we need
+    %% access_token, access_token_secret, user_id and screen name
     case Response of 
         {ok, "200", _, Body} ->
             RequestParams = uri_params_decode(Body),
@@ -195,12 +181,8 @@ screen_name(Params) ->
 user_id(Params) ->
       proplists:get_value("user_id", Params).
  
-generate_cookied_response_json(Name, Req) ->
-    RedirectUri = couch_config:get("twitter", "client_app_uri", nil),
-    xo_auth:generate_cookied_response_json(Name, Req, RedirectUri).
-
-% Param handling functions from erlang_oauth but either not exported or not in 
-% the CouchDB version
+%% Param handling functions from erlang_oauth but either not exported or not in 
+%% the CouchDB version
 uri_params_decode(String) ->
     [uri_param_decode(Substring) || Substring <- string:tokens(String, "&")].
 
@@ -223,7 +205,7 @@ hex2dec(C) when C >= $A andalso C =< $F ->
 hex2dec(C) when C >= $0 andalso C =< $9 ->
   C - $0.
 
-% Cookie functions borrowed from couch_httpd_auth.erl as they aren't exported     
+%% Cookie functions borrowed from couch_httpd_auth.erl as they aren't exported     
 token_cookie(Req, Value) ->
     Hash = encrypt(Value),
     mochiweb_cookies:cookie(?COOKIE_NAME,
@@ -248,10 +230,10 @@ max_age() ->
             [{max_age, Timeout}]
     end.
 
-% Functions to encode and decode cookie value
+%% Functions to encode and decode cookie value
 
 encrypt(Value) ->
-    % Extract required values from config ini
+    %% Extract required values from config ini
     [Key, IV] = lists:map(fun(K) ->
                       case couch_config:get("blowfish", K, undefined) of
                           undefined -> throw({missing_config_value, "Cannot find key '"++K++"' in [aes] section of config"});
@@ -277,7 +259,7 @@ decrypt(Value) ->
     BinaryIV = hexstr2bin(IV),
     ?b2l(crypto:blowfish_cfb64_decrypt(BinaryKey, BinaryIV, Value)).
   
-% hexstr2bin from crypto test suites
+%% hexstr2bin from crypto test suites
 hexstr2bin(S) ->
   list_to_binary(hexstr2list(S)).
 

@@ -2,10 +2,10 @@
 
 -export([generate_cookied_response_json/3]).
 -export([check_user_database/2]).
--export([create_user_doc/3]).
--export([create_user_doc/5]).
--export([update_access_token/3]).
+-export([create_user_doc/3, create_user_doc/5]).
+-export([create_user_doc_response/5]).
 -export([update_access_token/4]).
+-export([update_access_token/5]).
 
 -include("couch_db.hrl").
 -include("xo_auth.hrl").
@@ -115,22 +115,22 @@ create_user_doc(Username, ServiceName, ServiceID, AccessToken, AccessTokenSecret
         couch_db:close(Db)
     end.
 
-update_access_token(DocID, ServiceName, AccessToken) ->
-    ServiceDetailsUpdater =
-        fun(ServiceDetails) ->
-                ?replace(ServiceDetails, ?ACCESS_TOKEN, ?l2b(AccessToken))
-        end,
-    update_access_token_with_details(DocID, ServiceName, ServiceDetailsUpdater).
+create_user_doc_response(Req, ID, Provider, RedirectUri, {ok, Name}) ->
+    ?LOG_DEBUG("User doc ~p created for ~p id ~p", [Name, Provider, ID]),
+    %% Finally send a response that includes the AuthSession cookie
+    generate_cookied_response_json(?l2b(Name), Req, RedirectUri);
+create_user_doc_response(Req, ID, Provider, _RedirectUri, Error) ->
+    ?LOG_ERROR("Non-success from create_user_doc call for ID ~p and provider ~p: ~p", [ID, Provider, Error]),
+    couch_httpd:send_json(Req, 403, [], {[{error, <<"Unable to update doc">>}]}).
 
-update_access_token(DocID, ServiceName, AccessToken, AccessTokenSecret) ->
-    ServiceDetailsUpdater = 
-        fun(ServiceDetails) ->
-                ServiceDetails1 = ?replace(ServiceDetails, ?ACCESS_TOKEN, ?l2b(AccessToken)),
-                ?replace(ServiceDetails1, ?ACCESS_TOKEN_SECRET, ?l2b(AccessTokenSecret))
-        end,
-    update_access_token_with_details(DocID, ServiceName, ServiceDetailsUpdater).
+update_access_token(DocID, ServiceName, OldAccessToken, AccessToken) ->
+    update_access_token(DocID, ServiceName, OldAccessToken, AccessToken, <<>>).
 
-update_access_token_with_details(DocID, ServiceName, ServiceDetailsUpdater) ->
+update_access_token(_DocID, _ServiceName, OldAccessToken, AccessToken, _AccessTokenSecret) 
+  when OldAccessToken =:= AccessToken ->
+    ?LOG_DEBUG("Tokens are identical", []),
+    ok;
+update_access_token(DocID, ServiceName, _OldAccessToken, AccessToken, AccessTokenSecret) ->
     Db = open_auth_db(),
 
     %% Update a _users record with a new access key
@@ -142,7 +142,16 @@ update_access_token_with_details(DocID, ServiceName, ServiceDetailsUpdater) ->
                 {ServiceDetails} = couch_util:get_value(ServiceName, DocBody, []),
                 ?LOG_DEBUG("Extracted Service Details ~p", [ServiceDetails]),
 
-                ServiceDetails1 = {ServiceDetailsUpdater(ServiceDetails)},
+                %% Update values that are not empty
+                ServiceDetails1 = lists:foldl(fun({_Key, <<>>}, Acc) ->
+                                                      Acc;
+                                                 ({Key, Value}, Acc) ->
+                                                      ?replace(Acc, Key, Value)
+                                              end,
+                                              ServiceDetails,
+                                              [{?ACCESS_TOKEN, AccessToken},
+                                               {?ACCESS_TOKEN_SECRET, AccessTokenSecret}]),
+
                 ?LOG_DEBUG("Updated Service Details ~p", [ServiceDetails1]),
 
                 NewDocBody = ?replace(DocBody, ServiceName, ServiceDetails1),
@@ -216,6 +225,7 @@ query_xref_view(Db, StartKey, EndKey) ->
                    {start_key, {StartKey, ?MIN_STR}},
                    {end_key, {EndKey, ?MAX_STR}}
                   ],
+
     {ok, _, Result} = couch_view:fold(View, FoldlFun, [], ViewOptions),
     Result.
 
