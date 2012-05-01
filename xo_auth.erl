@@ -45,20 +45,21 @@ check_user_database(ServiceName, ID) ->
     %% for the supplied service name
     AuthDb = open_auth_db(),
     {ok, Db} = ensure_xo_views_exist(AuthDb),
+    try 
 
-    Result = 
         case query_xref_view(Db, [ServiceName, ID], [ServiceName, ID, <<"{}">>]) of
             [] ->
                 nil;
             [Row] ->
                 Row;
             [_ | _] ->
-            Reason = iolist_to_binary(
-                       io_lib:format("Found multiple matching entries for ~p ID: ~p", [ServiceName, ID])),
-                {error, {<<"oauth_token_consumer_key_pair">>, Reason}}
-        end,
-    couch_db:close(Db),
-    Result.
+                Reason = iolist_to_binary(
+                           io_lib:format("Found multiple matching entries for ~p ID: ~p", [ServiceName, ID])),
+                    {error, {<<"oauth_token_consumer_key_pair">>, Reason}}
+        end
+    after
+        couch_db:close(Db)
+    end.
 
 create_user_doc(Username, ServiceName, ServiceID) ->
     create_user_doc(Username, ServiceName, ServiceID, [], []).
@@ -69,48 +70,50 @@ create_user_doc(Username, ServiceName, ServiceID, AccessToken, AccessTokenSecret
     TrimmedName = re:replace(Username, "[^A-Za-z0-9_-]", "", [global, {return, list}]),
     ?LOG_DEBUG("Trimmed name is ~p", [TrimmedName]),
     Db = open_auth_db(),
+    try 
 
-    {Name} = get_unused_name(Db, TrimmedName),
-    ?LOG_DEBUG("Proceeding with name ~p", [Name]),
-    %% Generate a _users record with the appropriate
-    %% Service Record eg:
-    %% "facebook" : {"id" : "123456"", "access_token": "ABDE485864030DF73277E"}
-    FullID=?l2b("org.couchdb.user:"++Name),
-    ServiceDetails = case AccessTokenSecret of
-                         [] ->
-                             {[
-                               {?l2b("id"), ServiceID},
-                               {?l2b("access_token"), ?l2b(AccessToken)}]};
+        {Name} = get_unused_name(Db, TrimmedName),
+        ?LOG_DEBUG("Proceeding with name ~p", [Name]),
+        %% Generate a _users record with the appropriate
+        %% Service Record eg:
+        %% "facebook" : {"id" : "123456"", "access_token": "ABDE485864030DF73277E"}
+        FullID=?l2b("org.couchdb.user:"++Name),
+        ServiceDetails = case AccessTokenSecret of
+                             [] ->
+                                 {[
+                                   {<<"id">>, ServiceID},
+                                   {<<"access_token">>, ?l2b(AccessToken)}]};
 
-                         Secret ->
-                             {[
-                               {?l2b("id"), ServiceID},
-                               {?l2b("access_token"), ?l2b(AccessToken)},
-                               {?l2b("access_token_secret"), ?l2b(Secret)}]}
-                     end,
+                             Secret ->
+                                 {[
+                                   {<<"id">>, ServiceID},
+                                   {<<"access_token">>, ?l2b(AccessToken)},
+                                   {<<"access_token_secret">>, ?l2b(Secret)}]}
+                         end,
 
-    Salt=couch_uuids:random(),
-    NewDoc = #doc{
-      id=FullID,
-      body={[
-             {?l2b("_id"), FullID},
-             {?l2b("salt"), Salt},
-             {ServiceName, ServiceDetails},
-             {?l2b("name"), ?l2b(Name)},
-             {?l2b("roles"), []},
-             {?l2b("type"), ?l2b("user")}
-            ]}
-     },
-    %% See above for Validation reasoning
-    DbWithoutValidationFunc = Db#db{ validate_doc_funs=[] },
-    Result = case couch_db:update_doc(DbWithoutValidationFunc, NewDoc, []) of
-                 {ok, _} ->
-                     {ok, Name};
-                 Error ->
-                     Error
-             end,
-    couch_db:close(Db),
-    Result.
+        Salt=couch_uuids:random(),
+        NewDoc = #doc{
+          id=FullID,
+          body={[
+                 {<<"_id">>, FullID},
+                 {<<"salt">>, Salt},
+                 {ServiceName, ServiceDetails},
+                 {<<"name">>, ?l2b(Name)},
+                 {<<"roles">>, []},
+                 {<<"type">>, <<"user">>}
+                ]}
+         },
+        %% See above for Validation reasoning
+        DbWithoutValidationFunc = Db#db{ validate_doc_funs=[] },
+        case couch_db:update_doc(DbWithoutValidationFunc, NewDoc, []) of
+            {ok, _} ->
+                {ok, Name};
+            Error ->
+                Error
+        end
+    after
+        couch_db:close(Db)
+    end.
 
 update_access_token(DocID, ServiceName, AccessToken) ->
     ServiceDetailsUpdater =
