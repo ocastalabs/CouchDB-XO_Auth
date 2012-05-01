@@ -16,9 +16,31 @@ handle_fb_req(#httpd{method='GET'}=Req) ->
             couch_httpd:send_json(Req, 403, [], {[{error, <<"No code supplied">>}]});
         Code -> handle_fb_code(Req, Code)
     end;
-
 handle_fb_req(Req) ->
     couch_httpd:send_method_not_allowed(Req, "GET").
+
+
+handle_fb_code(Req, FBCode) ->
+    %% Extract required values from config ini
+    [RedirectURI, ClientID, ClientSecret] = 
+        xo_auth:extract_config_values("fb", ["redirect_uri", "client_id", "client_secret"]),
+    
+    %% if the client passed in a client app token then facebook should have passed it back to us,
+    %% so extract it.
+    ClientAppToken = case couch_httpd:qs_value(Req, "clientapptoken") of
+        undefined -> "";
+        Cat -> couch_util:url_encode(Cat)
+    end,
+    
+    %% Get an access token from Facebook
+    case request_facebook_access_token(ClientAppToken, RedirectURI, ClientID, ClientSecret, FBCode) of
+        {ok, AccessToken} ->
+            handle_facebook_access_token(Req, ClientID, ClientSecret, AccessToken);
+        Error ->
+            ?LOG_DEBUG("Non-success from request_facebook_access_token call: ~p", [Error]),
+            couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not get access token">>}]})
+    end.
+
 
 handle_facebook_access_token(Req, ClientID, ClientSecret, AccessToken) ->
     %% Retrieve info from the graph/me API call
@@ -83,31 +105,6 @@ handle_facebook_access_token(Req, ClientID, ClientSecret, AccessToken) ->
         Error ->
             ?LOG_DEBUG("Non-success from request_facebook_graphme_info call: ~p", [Error]),
             couch_httpd:send_json(Req, 403, [], {[{error, <<"Failed graphme request">>}]})
-    end.
-
-handle_fb_code(Req, FBCode) ->
-    %% Extract required values from config ini
-    [RedirectURI, ClientID, ClientSecret] = lists:map(fun(K) ->
-                                      case couch_config:get("fb", K, undefined) of
-                                          undefined -> throw({missing_config_value, "Cannot find key '"++K++"' in [fb] section of config"});
-                                          V -> V
-                                      end
-                                  end, ["redirect_uri", "client_id", "client_secret"]),
-
-    %% if the client passed in a client app token then facebook should have passed it back to us,
-    %% so extract it.
-    ClientAppToken = case couch_httpd:qs_value(Req, "clientapptoken") of
-        undefined -> "";
-        Cat -> couch_util:url_encode(Cat)
-    end,
-    
-    %% Get an access token from Facebook
-    case request_facebook_access_token(ClientAppToken, RedirectURI, ClientID, ClientSecret, FBCode) of
-        {ok, AccessToken} ->
-            handle_facebook_access_token(Req, ClientID, ClientSecret, AccessToken);
-        Error ->
-            ?LOG_DEBUG("Non-success from request_facebook_access_token call: ~p", [Error]),
-            couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not get access token">>}]})
     end.
 
 request_facebook_graphme_info(AccessToken) ->

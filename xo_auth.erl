@@ -6,6 +6,7 @@
 -export([create_user_doc_response/5]).
 -export([update_access_token/4]).
 -export([update_access_token/5]).
+-export([extract_config_values/2]).
 
 -include("couch_db.hrl").
 -include("xo_auth.hrl").
@@ -229,3 +230,12 @@ query_xref_view(Db, StartKey, EndKey) ->
     {ok, _, Result} = couch_view:fold(View, FoldlFun, [], ViewOptions),
     Result.
 
+
+extract_config_values(Category, Keys) ->
+    lists:map(fun(K) ->
+                      case couch_config:get(Category, K, undefined) of
+                          undefined -> throw({missing_config_value, 
+                                              "Cannot find key '" ++ K ++ "' in [" ++ Category  ++ "] section of config"});
+                          V -> V
+                      end
+              end, Keys).

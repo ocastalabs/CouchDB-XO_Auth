@@ -30,27 +30,23 @@ handle_twitter_req(#httpd{method='GET'}=Req) ->
                 undefined ->
                     ?LOG_DEBUG("No verifier found on Twitter callback: ~p", [Req]),
                     couch_httpd:send_json(Req, 403, [], {[{error, <<"No code supplied">>}]});
-                Verifier -> handle_twitter_callback(Req, RequestToken, Verifier)
+                Verifier -> 
+                    handle_twitter_callback(Req, RequestToken, Verifier)
             end
     end;
-
 handle_twitter_req(Req) ->
     couch_httpd:send_method_not_allowed(Req, "GET").
 
 
 request_twitter_request_token(Req) ->
     %% Extract required values from config ini
-    [CallbackUrl, ConsumerKey, ConsumerSecret] = lists:map(fun(K) ->
-                                      case couch_config:get("twitter", K, undefined) of
-                                          undefined -> throw({missing_config_value, "Cannot find key '"++K++"' in [twitter] section of config"});
-                                          V -> V
-                                      end
-                                  end, ["redirect_uri", "consumer_key", "consumer_secret"]),
+    [CallbackUrl, ConsumerKey, ConsumerSecret] = 
+        xo_auth:extract_config_values("twitter", ["redirect_uri", "consumer_key", "consumer_secret"]),
     
-    Url="https://api.twitter.com/oauth/request_token",
+    Url = "https://api.twitter.com/oauth/request_token",
     SignedParams = oauth:signed_params("GET", Url, [{"oauth_callback", CallbackUrl}], {ConsumerKey, ConsumerSecret, hmac_sha1}, "", ""),     
     OAuthUrl = oauth:uri(Url, SignedParams),
-    Resp=ibrowse:send_req(OAuthUrl, [], get, []),
+    Resp = ibrowse:send_req(OAuthUrl, [], get, []),
 
     case process_request_token_response(Req, Resp) of   
         {ok, RedirectURL, Headers} ->
@@ -70,7 +66,7 @@ process_request_token_response(Req, Response) ->
             RequestToken = oauth:token(RequestParams),
             RequestSecret = oauth:token_secret(RequestParams),
                 
-            AuthenticateUrl = "https://api.twitter.com/oauth/authenticate?oauth_token="++RequestToken,
+            AuthenticateUrl = "https://api.twitter.com/oauth/authenticate?oauth_token=" ++ RequestToken,
             ?LOG_DEBUG("obtain_twitter_request_token - redirecting to ~p", [AuthenticateUrl]),
 
             %% Redirect the client to the Twitter Oauth page
@@ -87,12 +83,8 @@ process_request_token_response(Req, Response) ->
 
 handle_twitter_callback(Req, RequestToken, Verifier) ->
     %% Extract required values from config ini
-    [ConsumerKey, ConsumerSecret] = lists:map(fun(K) ->
-                                      case couch_config:get("twitter", K, undefined) of
-                                          undefined -> throw({missing_config_value, "Cannot find key '"++K++"' in [twitter] section of config"});
-                                          V -> V
-                                      end
-                                  end, ["consumer_key", "consumer_secret"]),
+    [ConsumerKey, ConsumerSecret] = 
+        xo_auth:extract_config_values("twitter", ["consumer_key", "consumer_secret"]),
     
     RequestTokenSecret = get_token_secret_from_cookie(Req),
     ?LOG_DEBUG("Requesting Access Token with Token: ~p  TokenSecret: ~p", [RequestToken, RequestTokenSecret]),
@@ -233,13 +225,7 @@ max_age() ->
 %% Functions to encode and decode cookie value
 
 encrypt(Value) ->
-    %% Extract required values from config ini
-    [Key, IV] = lists:map(fun(K) ->
-                      case couch_config:get("blowfish", K, undefined) of
-                          undefined -> throw({missing_config_value, "Cannot find key '"++K++"' in [aes] section of config"});
-                          V -> V
-                      end
-                  end, ["key", "ivec"]),
+    [Key, IV] =  xo_auth:extract_config_values("blowfish", ["key", "ivec"]),
     
     ?LOG_DEBUG("AES Key: ~p  IVec= ~p", [Key, IV]),
     
@@ -248,12 +234,7 @@ encrypt(Value) ->
     crypto:blowfish_cfb64_encrypt(BinaryKey, BinaryIV, Value).
 
 decrypt(Value) ->
-    [Key, IV] = lists:map(fun(K) ->
-                      case couch_config:get("blowfish", K, undefined) of
-                          undefined -> throw({missing_config_value, "Cannot find key '"++K++"' in [aes] section of config"});
-                          V -> V
-                      end
-                  end, ["key", "ivec"]),
+    [Key, IV] =  xo_auth:extract_config_values("blowfish", ["key", "ivec"]),
     
     BinaryKey = hexstr2bin(Key),
     BinaryIV = hexstr2bin(IV),
