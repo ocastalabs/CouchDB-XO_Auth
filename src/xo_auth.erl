@@ -2,10 +2,11 @@
 
 -export([generate_cookied_response_json/3]).
 -export([check_user_database/2]).
--export([create_user_doc/3]).
--export([create_user_doc/5]).
--export([update_access_token/3]).
+-export([create_user_doc/3, create_user_doc/5]).
+-export([create_user_doc_response/5]).
 -export([update_access_token/4]).
+-export([update_access_token/5]).
+-export([extract_config_values/2]).
 
 -include_lib("couch/include/couch_db.hrl").
 -include("xo_auth.hrl").
@@ -45,89 +46,92 @@ check_user_database(ServiceName, ID) ->
     %% for the supplied service name
     AuthDb = open_auth_db(),
     {ok, Db} = ensure_xo_views_exist(AuthDb),
+    try 
 
-    Result = 
         case query_xref_view(Db, [ServiceName, ID], [ServiceName, ID, <<"{}">>]) of
             [] ->
                 nil;
             [Row] ->
                 Row;
             [_ | _] ->
-            Reason = iolist_to_binary(
-                       io_lib:format("Found multiple matching entries for ~p ID: ~p", [ServiceName, ID])),
-                {error, {<<"oauth_token_consumer_key_pair">>, Reason}}
-        end,
-    couch_db:close(Db),
-    Result.
+                Reason = iolist_to_binary(
+                           io_lib:format("Found multiple matching entries for ~p ID: ~p", [ServiceName, ID])),
+                    {error, {<<"oauth_token_consumer_key_pair">>, Reason}}
+        end
+    after
+        couch_db:close(Db)
+    end.
 
-create_user_doc(Username, ServiceName, ServiceID) ->
-    create_user_doc(Username, ServiceName, ServiceID, [], []).
+create_user_doc(Username, ServiceName, UserID) ->
+    create_user_doc(Username, ServiceName, UserID, [], []).
 
-create_user_doc(Username, ServiceName, ServiceID, AccessToken, AccessTokenSecret) ->
+create_user_doc(Username, ServiceName, UserID, AccessToken, AccessTokenSecret) ->
 
     %% Create user auth doc with access token
     TrimmedName = re:replace(Username, "[^A-Za-z0-9_-]", "", [global, {return, list}]),
     ?LOG_DEBUG("Trimmed name is ~p", [TrimmedName]),
     Db = open_auth_db(),
+    try 
 
-    {Name} = get_unused_name(Db, TrimmedName),
-    ?LOG_DEBUG("Proceeding with name ~p", [Name]),
-    %% Generate a _users record with the appropriate
-    %% Service Record eg:
-    %% "facebook" : {"id" : "123456"", "access_token": "ABDE485864030DF73277E"}
-    FullID=?l2b("org.couchdb.user:"++Name),
-    ServiceDetails = case AccessTokenSecret of
-                         [] ->
-                             {[
-                               {?l2b("id"), ServiceID},
-                               {?l2b("access_token"), ?l2b(AccessToken)}]};
+        {Name} = get_unused_name(Db, TrimmedName),
+        ?LOG_DEBUG("Proceeding with name ~p", [Name]),
+        %% Generate a _users record with the appropriate
+        %% Service Record eg:
+        %% "facebook" : {"id" : "123456"", "access_token": "ABDE485864030DF73277E"}
+        FullID=?l2b("org.couchdb.user:"++Name),
+        ServiceDetails = case AccessTokenSecret of
+                             [] ->
+                                 {[
+                                   {<<"id">>, UserID},
+                                   {<<"access_token">>, ?l2b(AccessToken)}]};
 
-                         Secret ->
-                             {[
-                               {?l2b("id"), ServiceID},
-                               {?l2b("access_token"), ?l2b(AccessToken)},
-                               {?l2b("access_token_secret"), ?l2b(Secret)}]}
-                     end,
+                             Secret ->
+                                 {[
+                                   {<<"id">>, UserID},
+                                   {<<"access_token">>, ?l2b(AccessToken)},
+                                   {<<"access_token_secret">>, ?l2b(Secret)}]}
+                         end,
 
-    Salt=couch_uuids:random(),
-    NewDoc = #doc{
-      id=FullID,
-      body={[
-             {?l2b("_id"), FullID},
-             {?l2b("salt"), Salt},
-             {ServiceName, ServiceDetails},
-             {?l2b("name"), ?l2b(Name)},
-             {?l2b("roles"), []},
-             {?l2b("type"), ?l2b("user")}
-            ]}
-     },
-    %% See above for Validation reasoning
-    DbWithoutValidationFunc = Db#db{ validate_doc_funs=[] },
-    Result = case couch_db:update_doc(DbWithoutValidationFunc, NewDoc, []) of
-                 {ok, _} ->
-                     {ok, Name};
-                 Error ->
-                     Error
-             end,
-    couch_db:close(Db),
-    Result.
+        Salt=couch_uuids:random(),
+        NewDoc = #doc{
+          id=FullID,
+          body={[
+                 {<<"_id">>, FullID},
+                 {<<"salt">>, Salt},
+                 {ServiceName, ServiceDetails},
+                 {<<"name">>, ?l2b(Name)},
+                 {<<"roles">>, []},
+                 {<<"type">>, <<"user">>}
+                ]}
+         },
+        %% See above for Validation reasoning
+        DbWithoutValidationFunc = Db#db{ validate_doc_funs=[] },
+        case couch_db:update_doc(DbWithoutValidationFunc, NewDoc, []) of
+            {ok, _} ->
+                {ok, Name};
+            Error ->
+                Error
+        end
+    after
+        couch_db:close(Db)
+    end.
 
-update_access_token(DocID, ServiceName, AccessToken) ->
-    ServiceDetailsUpdater =
-        fun(ServiceDetails) ->
-                ?replace(ServiceDetails, ?ACCESS_TOKEN, ?l2b(AccessToken))
-        end,
-    update_access_token_with_details(DocID, ServiceName, ServiceDetailsUpdater).
+create_user_doc_response(Req, ID, Provider, RedirectUri, {ok, Name}) ->
+    ?LOG_DEBUG("User doc ~p created for ~p id ~p", [Name, Provider, ID]),
+    %% Finally send a response that includes the AuthSession cookie
+    generate_cookied_response_json(?l2b(Name), Req, RedirectUri);
+create_user_doc_response(Req, ID, Provider, _RedirectUri, Error) ->
+    ?LOG_ERROR("Non-success from create_user_doc call for ID ~p and provider ~p: ~p", [ID, Provider, Error]),
+    couch_httpd:send_json(Req, 403, [], {[{error, <<"Unable to update doc">>}]}).
 
-update_access_token(DocID, ServiceName, AccessToken, AccessTokenSecret) ->
-    ServiceDetailsUpdater = 
-        fun(ServiceDetails) ->
-                ServiceDetails1 = ?replace(ServiceDetails, ?ACCESS_TOKEN, ?l2b(AccessToken)),
-                ?replace(ServiceDetails1, ?ACCESS_TOKEN_SECRET, ?l2b(AccessTokenSecret))
-        end,
-    update_access_token_with_details(DocID, ServiceName, ServiceDetailsUpdater).
+update_access_token(DocID, ServiceName, OldAccessToken, AccessToken) ->
+    update_access_token(DocID, ServiceName, OldAccessToken, AccessToken, <<>>).
 
-update_access_token_with_details(DocID, ServiceName, ServiceDetailsUpdater) ->
+update_access_token(_DocID, _ServiceName, OldAccessToken, AccessToken, _AccessTokenSecret) 
+  when OldAccessToken =:= AccessToken ->
+    ?LOG_DEBUG("Tokens are identical", []),
+    ok;
+update_access_token(DocID, ServiceName, _OldAccessToken, AccessToken, AccessTokenSecret) ->
     Db = open_auth_db(),
 
     %% Update a _users record with a new access key
@@ -139,11 +143,20 @@ update_access_token_with_details(DocID, ServiceName, ServiceDetailsUpdater) ->
                 {ServiceDetails} = couch_util:get_value(ServiceName, DocBody, []),
                 ?LOG_DEBUG("Extracted Service Details ~p", [ServiceDetails]),
 
-                ServiceDetails1 = {ServiceDetailsUpdater(ServiceDetails)},
+                %% Update values that are not empty
+                ServiceDetails1 = {lists:foldl(fun({_Key, <<>>}, Acc) ->
+                                                       Acc;
+                                                  ({Key, Value}, Acc) ->
+                                                       ?replace(Acc, Key, Value)
+                                               end,
+                                               ServiceDetails,
+                                               [{?ACCESS_TOKEN, AccessToken},
+                                                {?ACCESS_TOKEN_SECRET, AccessTokenSecret}])},
+
                 ?LOG_DEBUG("Updated Service Details ~p", [ServiceDetails1]),
 
                 NewDocBody = ?replace(DocBody, ServiceName, ServiceDetails1),
-                ?LOG_DEBUG("Updated Body ~p", [NewDocBody]),
+                ?LOG_DEBUG("Updated Body: ~p", [NewDocBody]),
                 
                 %% To prevent the validation functions for the db taking umbrage at our
                 %% behind the scenes twiddling, we blank them out.
@@ -213,6 +226,16 @@ query_xref_view(Db, StartKey, EndKey) ->
                    {start_key, {StartKey, ?MIN_STR}},
                    {end_key, {EndKey, ?MAX_STR}}
                   ],
+
     {ok, _, Result} = couch_view:fold(View, FoldlFun, [], ViewOptions),
     Result.
 
+
+extract_config_values(Category, Keys) ->
+    lists:map(fun(K) ->
+                      case couch_config:get(Category, K, undefined) of
+                          undefined -> throw({missing_config_value, 
+                                              "Cannot find key '" ++ K ++ "' in [" ++ Category  ++ "] section of config"});
+                          V -> V
+                      end
+              end, Keys).
