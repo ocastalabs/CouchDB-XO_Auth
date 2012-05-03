@@ -112,22 +112,21 @@ create_or_update_user(Req, {ok, AccessToken, AccessTokenSecret, ScreenName, User
             end;
 
         {Result} ->
-            Result
-    %%         ?LOG_DEBUG("View result is ~p", [Result]),
-    %%         DocID = couch_util:get_value(<<"user_id">>, Result, []),
-    %%         Name = couch_util:get_value(<<"name">>, Result, []),
+            ?LOG_DEBUG("View result is ~p", [Result]),
+            DocID = couch_util:get_value(<<"user_id">>, Result, []),
+            Name = couch_util:get_value(<<"name">>, Result, []),
 
-    %%         case couch_config:get("twitter", "store_access_token", "false") of
-    %%             "false" ->
-    %%                 xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
-    %%             _ ->
-    %%                 OldAccessToken = couch_util:get_value(<<"access_token">>, Result, []),
-    %%                 xo_auth:update_access_token(DocID, <<"twitter">>, OldAccessToken, ?l2b(AccessToken), ?l2b(AccessTokenSecret)),
-    %%                 xo_auth:generate_cookied_response_json(Name, Req, RedirectUri)
-    %%         end;
-
-    %%     {error, Reason} ->
-    %%         couch_httpd:send_json(Req, 403, [], {[{<<"xo_auth">>, Reason}]})
+            case couch_config:get("twitter", "store_access_token", "false") of
+                "false" ->
+                    xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
+                _ ->
+                    OldAccessToken = couch_util:get_value(<<"access_token">>, Result, []),
+                    xo_auth:update_access_token(DocID, <<"twitter">>, OldAccessToken, ?l2b(AccessToken), ?l2b(AccessTokenSecret)),
+                    xo_auth:generate_cookied_response_json(Name, Req, RedirectUri)
+            end;
+        
+        {error, Reason} ->
+            couch_httpd:send_json(Req, 403, [], {[{<<"xo_auth">>, Reason}]})
     end;
 create_or_update_user(Req, Error) ->
     ?LOG_DEBUG("Non-success from request_twitter_access_token call: ~p", [Error]),
