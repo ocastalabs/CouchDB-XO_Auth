@@ -1,5 +1,5 @@
 -module(xo_auth_twitter).
--export([handle_twitter_req/1]).
+-export([handle_twitter_req/1, create_or_update_user/2]).
 -include_lib("couch/include/couch_db.hrl").
 
 %% This module handles Twitter signin and _user document creation.
@@ -92,46 +92,47 @@ handle_twitter_callback(Req, RequestToken, Verifier) ->
     OAuthUrl = oauth:uri(URL, SignedParams),
     Resp=ibrowse:send_req(OAuthUrl, [], get, []),
 
-    case process_twitter_access_token_response(Resp) of   
-        {ok, AccessToken, AccessTokenSecret, ScreenName, UserID} ->
-            RedirectUri = couch_config:get("twitter", "client_app_uri", nil),
-            
-            case xo_auth:check_user_database(<<"twitter">>, ?l2b(UserID)) of
-                nil ->
-                    ?LOG_DEBUG("Nothing found for Twitter ID: ~p", [UserID]),
-                    case couch_config:get("twitter", "store_access_token", "false") of
-                        "false" ->
-                            xo_auth:create_user_doc_response(
-                              Req, UserID, "twitter", RedirectUri, 
-                              xo_auth:create_user_doc(ScreenName, <<"twitter">>, ?l2b(UserID)));
-                        _ ->    
-                            xo_auth:create_user_doc_response(
-                              Req, UserID, "twitter", RedirectUri,
-                              xo_auth:create_user_doc(ScreenName, <<"twitter">>, ?l2b(UserID), AccessToken, AccessTokenSecret))
-                    end;
-                    
-                {Result} ->
-                    ?LOG_DEBUG("View result is ~p", [Result]),
-                    DocID = couch_util:get_value(<<"user_id">>, Result, []),
-                    Name = couch_util:get_value(<<"name">>, Result, []),
-                    
-                    case couch_config:get("twitter", "store_access_token", "false") of
-                        "false" ->
-                            xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
-                        _ ->
-                            OldAccessToken = couch_util:get_value(<<"access_token">>, Result, []),
-                            xo_auth:update_access_token(DocID, <<"twitter">>, OldAccessToken, ?l2b(AccessToken), ?l2b(AccessTokenSecret)),
-                            xo_auth:generate_cookied_response_json(Name, Req, RedirectUri)
-                    end;
-                    
-                {error, Reason} ->
-                    couch_httpd:send_json(Req, 403, [], {[{<<"xo_auth">>, Reason}]})
+    AccessTokenResponse = process_twitter_access_token_response(Resp),
+    create_or_update_user(Req, AccessTokenResponse).
+
+create_or_update_user(Req, {ok, AccessToken, AccessTokenSecret, ScreenName, UserID}) ->
+    RedirectUri = couch_config:get("twitter", "client_app_uri", nil),
+    case xo_auth:check_user_database(<<"twitter">>, ?l2b(UserID)) of
+        nil ->
+            ?LOG_DEBUG("No user for for Twitter ID: ~p", [UserID]),
+            case couch_config:get("twitter", "store_access_token", "false") of
+                "false" ->
+                    xo_auth:create_user_doc_response(
+                      Req, RedirectUri, 
+                      xo_auth:create_user_doc(ScreenName, <<"twitter">>, ?l2b(UserID)));
+                _ -> 
+                    xo_auth:create_user_doc_response(
+                      Req, RedirectUri,
+                      xo_auth:create_user_doc(ScreenName, <<"twitter">>, ?l2b(UserID), AccessToken, AccessTokenSecret))
             end;
-                
-        Error ->
-            ?LOG_DEBUG("Non-success from request_twitter_access_token call: ~p", [Error]),
-            couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not get access token">>}]})
-    end.
+
+        {Result} ->
+            Result
+    %%         ?LOG_DEBUG("View result is ~p", [Result]),
+    %%         DocID = couch_util:get_value(<<"user_id">>, Result, []),
+    %%         Name = couch_util:get_value(<<"name">>, Result, []),
+
+    %%         case couch_config:get("twitter", "store_access_token", "false") of
+    %%             "false" ->
+    %%                 xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
+    %%             _ ->
+    %%                 OldAccessToken = couch_util:get_value(<<"access_token">>, Result, []),
+    %%                 xo_auth:update_access_token(DocID, <<"twitter">>, OldAccessToken, ?l2b(AccessToken), ?l2b(AccessTokenSecret)),
+    %%                 xo_auth:generate_cookied_response_json(Name, Req, RedirectUri)
+    %%         end;
+
+    %%     {error, Reason} ->
+    %%         couch_httpd:send_json(Req, 403, [], {[{<<"xo_auth">>, Reason}]})
+    end;
+create_or_update_user(Req, Error) ->
+    ?LOG_DEBUG("Non-success from request_twitter_access_token call: ~p", [Error]),
+    couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not get access token">>}]}).
+
 
 get_token_secret_from_cookie(#httpd{mochi_req=MochiReq}=Req) ->
     case MochiReq:get_cookie_value(?COOKIE_NAME) of
@@ -174,6 +175,7 @@ user_id(Params) ->
 
 %% Cookie functions borrowed from couch_httpd_auth.erl as they aren't exported     
 token_cookie(Req, Value) ->
+    throw(foo),
     Hash = encrypt(Value),
     mochiweb_cookies:cookie(?COOKIE_NAME,
         couch_util:encodeBase64Url(?b2l(Hash)),
@@ -230,4 +232,5 @@ mkint(C) when $A =< C, C =< $F ->
   C - $A + 10;
 mkint(C) when $a =< C, C =< $f ->
   C - $a + 10.
+
   

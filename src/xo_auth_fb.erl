@@ -54,8 +54,7 @@ handle_facebook_access_token(Req, ClientID, ClientSecret, AccessToken) ->
                     case couch_config:get("fb", "store_access_token", "false") of
                         "false" ->
                             xo_auth:create_user_doc_response(
-                              Req, ID, "facebook", 
-                              RedirectUri,
+                              Req, RedirectUri,
                               xo_auth:create_user_doc(FBUsername, <<"facebook">>, ID));
                         
                         _ ->
@@ -67,7 +66,7 @@ handle_facebook_access_token(Req, ClientID, ClientSecret, AccessToken) ->
                                 {ok, NewToken} ->
                                     ?LOG_DEBUG("Extended access token. New token: ~p", [NewToken]),
                                     xo_auth:create_user_doc_response(
-                                      Req, ID, "facebook", RedirectUri,
+                                      Req, RedirectUri,
                                       xo_auth:create_user_doc(FBUsername, <<"facebook">>, ID, NewToken, []));
                                 Error ->
                                     ?LOG_INFO("Failed to extend expiration of token: ~p", [Error]),

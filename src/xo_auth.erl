@@ -3,7 +3,7 @@
 -export([generate_cookied_response_json/3]).
 -export([check_user_database/2]).
 -export([create_user_doc/3, create_user_doc/5]).
--export([create_user_doc_response/5]).
+-export([create_user_doc_response/3]).
 -export([update_access_token/4]).
 -export([update_access_token/5]).
 -export([extract_config_values/2]).
@@ -108,20 +108,20 @@ create_user_doc(Username, ServiceName, UserID, AccessToken, AccessTokenSecret) -
         DbWithoutValidationFunc = Db#db{ validate_doc_funs=[] },
         case couch_db:update_doc(DbWithoutValidationFunc, NewDoc, []) of
             {ok, _} ->
+                ?LOG_DEBUG("User doc created for ~p:~p", [Name, FullID]),
                 {ok, Name};
             Error ->
+                ?LOG_ERROR("Could not create user doc for ~p:~p", [Name, FullID]),
                 Error
         end
     after
         couch_db:close(Db)
     end.
 
-create_user_doc_response(Req, ID, Provider, RedirectUri, {ok, Name}) ->
-    ?LOG_DEBUG("User doc ~p created for ~p id ~p", [Name, Provider, ID]),
+create_user_doc_response(Req, RedirectUri, {ok, Name}) ->
     %% Finally send a response that includes the AuthSession cookie
     generate_cookied_response_json(?l2b(Name), Req, RedirectUri);
-create_user_doc_response(Req, ID, Provider, _RedirectUri, Error) ->
-    ?LOG_ERROR("Non-success from create_user_doc call for ID ~p and provider ~p: ~p", [ID, Provider, Error]),
+create_user_doc_response(Req, _RedirectUri, _Error) ->
     couch_httpd:send_json(Req, 403, [], {[{error, <<"Unable to update doc">>}]}).
 
 update_access_token(DocID, ServiceName, OldAccessToken, AccessToken) ->
