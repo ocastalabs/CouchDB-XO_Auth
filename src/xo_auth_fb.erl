@@ -35,76 +35,71 @@ handle_fb_code(Req, FBCode) ->
     %% Get an access token from Facebook
     case request_facebook_access_token(ClientAppToken, RedirectURI, ClientID, ClientSecret, FBCode) of
         {ok, AccessToken} ->
-            handle_facebook_access_token(Req, ClientID, ClientSecret, AccessToken);
+            %% Retrieve info from the graph/me API call
+            GraphmeResponse = request_facebook_graphme_info(AccessToken),
+            create_or_update_user(Req, ClientID, ClientSecret, AccessToken, GraphmeResponse);
         Error ->
             ?LOG_DEBUG("Non-success from request_facebook_access_token call: ~p", [Error]),
             couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not get access token">>}]})
     end.
 
+create_or_update_user(Req, ClientID, ClientSecret, AccessToken, {ok, ID, FBUsername}) ->
+    RedirectUri = couch_config:get("fb", "client_app_uri", nil),
+    case xo_auth:check_user_database(<<"facebook">>, ID) of
+        nil ->
+            ?LOG_DEBUG("Nothing found for facebook ID: ~p", [ID]),
+            case couch_config:get("fb", "store_access_token", "false") of
+                "false" ->
+                    xo_auth:create_user_doc_response(
+                      Req, RedirectUri,
+                      xo_auth:create_user_doc(FBUsername, <<"facebook">>, ID));
 
-handle_facebook_access_token(Req, ClientID, ClientSecret, AccessToken) ->
-    %% Retrieve info from the graph/me API call
-    case request_facebook_graphme_info(AccessToken) of
-        {ok, ID, FBUsername} ->
-            RedirectUri = couch_config:get("fb", "client_app_uri", nil),
-            
-            case xo_auth:check_user_database(<<"facebook">>, ID) of
-                nil ->
-                    ?LOG_DEBUG("Nothing found for facebook ID: ~p", [ID]),
-                    case couch_config:get("fb", "store_access_token", "false") of
-                        "false" ->
+                _ ->
+                    %% Because of the deprecation of offlineAccess we now ask for
+                    %% an extension.
+                    ExtensionResult = 
+                        request_access_token_extension(ClientID, ClientSecret, AccessToken),
+                    case ExtensionResult of
+                        {ok, NewToken} ->
+                            ?LOG_DEBUG("Extended access token. New token: ~p", [NewToken]),
                             xo_auth:create_user_doc_response(
                               Req, RedirectUri,
-                              xo_auth:create_user_doc(FBUsername, <<"facebook">>, ID));
-                        
-                        _ ->
-                            %% Because of the deprecation of offlineAccess we now ask for
-                            %% an extension.
-                            ExtensionResult = 
-                                request_access_token_extension(ClientID, ClientSecret, AccessToken),
-                            case ExtensionResult of
-                                {ok, NewToken} ->
-                                    ?LOG_DEBUG("Extended access token. New token: ~p", [NewToken]),
-                                    xo_auth:create_user_doc_response(
-                                      Req, RedirectUri,
-                                      xo_auth:create_user_doc(FBUsername, <<"facebook">>, ID, NewToken, []));
-                                Error ->
-                                    ?LOG_INFO("Failed to extend expiration of token: ~p", [Error]),
-                                    couch_httpd:send_json(Req, 403, [], {[{error, <<"Failed to extend expiration of token">>}]})
-                            end
-                                
-                    end;
-                    
-                    
-                {Result} ->
-                    ?LOG_DEBUG("View result is ~p", [Result]),
-                    DocID = couch_util:get_value(<<"user_id">>, Result, []),
-                    Name = couch_util:get_value(<<"name">>, Result, []),
-                    
-                    case couch_config:get("fb", "store_access_token", "false") of
-                        "false" ->
-                            xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
-                            
-                        _ ->
-                            OldAccessToken = couch_util:get_value(<<"access_token">>, Result, []),
-                            case request_access_token_extension(ClientID, ClientSecret, AccessToken) of
-                                {ok, ExtendedToken} ->
-                                    xo_auth:update_access_token(DocID, <<"facebook">>, OldAccessToken, ?l2b(ExtendedToken)),
-                                    xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
-                                Error ->
-                                    ?LOG_INFO("Failed to extend token: ~p", [Error]),
-                                    couch_httpd:send_json(Req, 403, [], {[{error, <<"Failed to extend expiration of token">>}]})
-                            end
-                    end;
-                    
-                {error, Reason} ->
-                    couch_httpd:send_json(Req, 403, [], {[{<<"xo_auth">>, Reason}]})
+                              xo_auth:create_user_doc(FBUsername, <<"facebook">>, ID, NewToken, []));
+                        Error ->
+                            ?LOG_INFO("Failed to extend expiration of token: ~p", [Error]),
+                            couch_httpd:send_json(Req, 403, [], {[{error, <<"Failed to extend expiration of token">>}]})
+                    end
+
             end;
-                        
-        Error ->
-            ?LOG_DEBUG("Non-success from request_facebook_graphme_info call: ~p", [Error]),
-            couch_httpd:send_json(Req, 403, [], {[{error, <<"Failed graphme request">>}]})
-    end.
+
+
+        {Result} ->
+            ?LOG_DEBUG("View result is ~p", [Result]),
+            DocID = couch_util:get_value(<<"user_id">>, Result, []),
+            Name = couch_util:get_value(<<"name">>, Result, []),
+
+            case couch_config:get("fb", "store_access_token", "false") of
+                "false" ->
+                    xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
+
+                _ ->
+                    OldAccessToken = couch_util:get_value(<<"access_token">>, Result, []),
+                    case request_access_token_extension(ClientID, ClientSecret, AccessToken) of
+                        {ok, ExtendedToken} ->
+                            xo_auth:update_access_token(DocID, <<"facebook">>, OldAccessToken, ?l2b(ExtendedToken)),
+                            xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
+                        Error ->
+                            ?LOG_INFO("Failed to extend token: ~p", [Error]),
+                            couch_httpd:send_json(Req, 403, [], {[{error, <<"Failed to extend expiration of token">>}]})
+                    end
+            end;
+
+        {error, Reason} ->
+            couch_httpd:send_json(Req, 403, [], {[{<<"xo_auth">>, Reason}]})
+    end;
+create_or_update_user(Req, ClientID, _, _, Error) ->
+    ?LOG_DEBUG("Non-success from request_facebook_graphme_info call for client ~p: ~p", [ClientID, Error]),
+    couch_httpd:send_json(Req, 403, [], {[{error, <<"Failed graphme request">>}]}).
 
 request_facebook_graphme_info(AccessToken) ->
     %% Construct the URL to access the graph API's /me page

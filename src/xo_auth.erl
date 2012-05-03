@@ -79,18 +79,17 @@ create_user_doc(Username, ServiceName, UserID, AccessToken, AccessTokenSecret) -
         %% Service Record eg:
         %% "facebook" : {"id" : "123456"", "access_token": "ABDE485864030DF73277E"}
         FullID=?l2b("org.couchdb.user:"++Name),
-        ServiceDetails = case AccessTokenSecret of
-                             [] ->
-                                 {[
-                                   {<<"id">>, UserID},
-                                   {<<"access_token">>, ?l2b(AccessToken)}]};
 
-                             Secret ->
-                                 {[
-                                   {<<"id">>, UserID},
-                                   {<<"access_token">>, ?l2b(AccessToken)},
-                                   {<<"access_token_secret">>, ?l2b(Secret)}]}
-                         end,
+        %% Add the access token and secret if they are non-empty
+        CommonServiceDetails = [{<<"id">>, UserID}],
+        ServiceDetails = {lists:foldl(fun({_Key, <<>>}, Acc) ->
+                                              Acc;
+                                         (Pair, Acc) ->
+                                              [Pair|Acc]
+                                      end,
+                                      CommonServiceDetails,
+                                      [{<<"access_token">>,  ?l2b(AccessToken)},
+                                       {<<"access_token_secret">>, ?l2b(AccessTokenSecret)}])},
 
         Salt=couch_uuids:random(),
         NewDoc = #doc{
