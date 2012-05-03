@@ -60,7 +60,7 @@ process_request_token_response(Req, Response) ->
     %% Extract Request Token from body and generate authenticate URL
     case Response of 
         {ok, "200", _, Body} ->
-            RequestParams = uri_params_decode(Body),
+            RequestParams = mochiweb_util:parse_qs(Body),
             RequestToken = oauth:token(RequestParams),
             RequestSecret = oauth:token_secret(RequestParams),
                 
@@ -153,7 +153,7 @@ process_twitter_access_token_response(Response) ->
     %% access_token, access_token_secret, user_id and screen name
     case Response of 
         {ok, "200", _, Body} ->
-            RequestParams = uri_params_decode(Body),
+            RequestParams =  mochiweb_util:parse_qs(Body),
             AccessToken = oauth:token(RequestParams),
             AccessTokenSecret = oauth:token_secret(RequestParams),
             ScreenName = screen_name(RequestParams),
@@ -171,29 +171,6 @@ screen_name(Params) ->
 user_id(Params) ->
       proplists:get_value("user_id", Params).
  
-%% Param handling functions from erlang_oauth but either not exported or not in 
-%% the CouchDB version
-uri_params_decode(String) ->
-    [uri_param_decode(Substring) || Substring <- string:tokens(String, "&")].
-
-uri_param_decode(String) ->
-    [Key, Value] = string:tokens(String, "="),
-    {uri_decode(Key), uri_decode(Value)}.
-
-uri_decode(Str) when is_list(Str) ->
-    uri_decode(Str, []).
-
-uri_decode([$%, A, B | T], Acc) ->
-    uri_decode(T, [(hex2dec(A) bsl 4) + hex2dec(B) | Acc]);
-uri_decode([X | T], Acc) ->
-    uri_decode(T, [X | Acc]);
-uri_decode([], Acc) ->
-    lists:reverse(Acc, []).
-
-hex2dec(C) when C >= $A andalso C =< $F ->
-  C - $A + 10;
-hex2dec(C) when C >= $0 andalso C =< $9 ->
-  C - $0.
 
 %% Cookie functions borrowed from couch_httpd_auth.erl as they aren't exported     
 token_cookie(Req, Value) ->

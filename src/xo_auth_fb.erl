@@ -158,7 +158,7 @@ process_facebook_access_token(Resp) ->
     %% Extract the info we need
     case Resp of 
         {ok, "200", _, Body} ->
-            Props = url_decode(Body),
+            Props = mochiweb_util:parse_qs(Body),
             case lists:keyfind("access_token", 1, Props) of
                 {_, AccessToken} ->
                     ?LOG_DEBUG("process_facebook_access_token: access_token=~p",[AccessToken]),
@@ -174,7 +174,6 @@ process_facebook_access_token(Resp) ->
 
 request_access_token_extension(ClientID, ClientSecret, Token) ->
     %% Construct the request URL.
-
     Url="https://graph.facebook.com/oauth/access_token?client_id="++ClientID++"&client_secret="++ClientSecret++"&grant_type=fb_exchange_token&fb_exchange_token="++Token,
     ?LOG_DEBUG("request_access_token_extension: requesting using URL - ~p", [Url]),
 
@@ -189,7 +188,7 @@ process_access_token_extension(Resp) ->
     %% Extract the info we need
     case Resp of 
         {ok, "200", _, Body} ->
-            Props = url_decode(Body),
+            Props = mochiweb_util:parse_qs(Body),
             case lists:keyfind("access_token", 1, Props) of
                 {_, NewAccessToken} ->
                     ?LOG_DEBUG("process_access_token_extension: access_token=~p",[NewAccessToken]),
@@ -202,12 +201,4 @@ process_access_token_extension(Resp) ->
             ?LOG_DEBUG("process_access_token_extension: non 200 response of: ~p", [Resp]),
             {error, "Non 200 response from facebook"}
     end.
-
-url_decode(Body) ->
-    Pairs = string:tokens(Body, "&"),
-    lists:map(fun(Pair) ->
-                      [Key, Value] = string:tokens(Pair, "="),
-                      {Key, Value}
-              end,
-              Pairs).
 
