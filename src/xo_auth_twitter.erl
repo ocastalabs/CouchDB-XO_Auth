@@ -174,7 +174,6 @@ user_id(Params) ->
 
 %% Cookie functions borrowed from couch_httpd_auth.erl as they aren't exported     
 token_cookie(Req, Value) ->
-    throw(foo),
     Hash = encrypt(Value),
     mochiweb_cookies:cookie(?COOKIE_NAME,
         couch_util:encodeBase64Url(?b2l(Hash)),
