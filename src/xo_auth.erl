@@ -96,16 +96,13 @@ determine_username(Req, Provider, ProviderID, ProviderUsername) ->
             %% same provider ID).
             case check_user_database(?l2b(Provider), ?l2b(ProviderID)) of
                 {Result} ->
-                    ?LOG_DEBUG("!!!! ~p ~p:~p", [Result, ?l2b(Provider), ?l2b(ProviderID)]),
-                    
                     case couch_util:get_value(<<"name">>, Result, []) of
                         SessionUsername ->
                             SessionUsername;
                         _ ->
                             throw(account_already_associated_with_another_user)
                     end;
-                X ->
-                    ?LOG_DEBUG("!!!! ~p ~p:~p", [X, ?l2b(Provider), ?l2b(ProviderID)]),
+                _ ->
                     %% The subsequent code is base on the fact that the document for the user
                     %% should exist. If the browser for some reason has a cookie for a user that 
                     %% doesn't exist in the db, fail nicely
