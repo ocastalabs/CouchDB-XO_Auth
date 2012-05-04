@@ -9,12 +9,28 @@
 
 %% Exported functions
 handle_fb_req(#httpd{method='GET'}=Req) ->
-    %% Did we get a 'code' or 'error' back from facebook?
-    case couch_httpd:qs_value(Req, "code") of
-        undefined ->
-            ?LOG_DEBUG("Facebook responded with something other than a code: ~p", [Req]),
-            couch_httpd:send_json(Req, 403, [], {[{error, <<"No code supplied">>}]});
-        Code -> handle_fb_code(Req, Code)
+    try 
+        %% Did we get a 'code' or 'error' back from facebook?
+        case couch_httpd:qs_value(Req, "code") of
+            undefined ->
+                ?LOG_DEBUG("Facebook responded with something other than a code: ~p", [Req]),
+                couch_httpd:send_json(Req, 403, [], {[{error, <<"No code supplied">>}]});
+            Code -> 
+                handle_fb_code(Req, Code)
+        end
+    catch
+        throw:could_not_create_user_skeleton ->
+            couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not create user skeleton">>}]});
+        throw:account_already_associated_with_another_user ->
+            couch_httpd:send_json(Req, 400, [], {[{error, <<"Facebook account registered with another user">>}]});
+        throw:could_not_extend_token ->
+            couch_httpd:send_json(Req, 403, [], {[{error, <<"Failed to extend expiration of token">>}]});
+        throw:non_200_from_graphme ->
+            couch_httpd:send_json(Req, 403, [], {[{error, <<"Non 200 response from graphme">>}]});
+        throw:no_document_for_user ->
+            couch_httpd:send_json(Req, 403, [], {[{error, <<"No user exists for auth session cookie">>}]});
+        throw:document_not_found_for_user ->
+            couch_httpd:send_json(Req, 500, [], {[{error, <<"Document not found for user">>}]})
     end;
 handle_fb_req(Req) ->
     couch_httpd:send_method_not_allowed(Req, "GET").
@@ -43,63 +59,20 @@ handle_fb_code(Req, FBCode) ->
             couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not get access token">>}]})
     end.
 
-create_or_update_user(Req, ClientID, ClientSecret, AccessToken, {ok, ID, FBUsername}) ->
+create_or_update_user(Req, ClientID, ClientSecret, AccessToken, {ok, FacebookUserID, FBUsername}) ->
+    Username = xo_auth:determine_username(Req, "facebook", FacebookUserID, FBUsername),
+
+    %% Extend the token if its will be stored
+    ok = case couch_config:get("fb", "store_access_token", "false") of
+             "true" ->
+                 {ok, NewToken} = request_access_token_extension(ClientID, ClientSecret, AccessToken),
+                 xo_auth:update_service_details(Username, "facebook", FacebookUserID, NewToken);
+             _ ->
+                 xo_auth:update_service_details(Username, "facebook", FacebookUserID, [])
+         end,
+                 
     RedirectUri = couch_config:get("fb", "client_app_uri", nil),
-    case xo_auth:check_user_database(<<"facebook">>, ID) of
-        nil ->
-            ?LOG_DEBUG("Nothing found for facebook ID: ~p", [ID]),
-            case couch_config:get("fb", "store_access_token", "false") of
-                "false" ->
-                    xo_auth:create_user_doc_response(
-                      Req, RedirectUri,
-                      xo_auth:create_user_doc(FBUsername, <<"facebook">>, ID));
-
-                _ ->
-                    %% Because of the deprecation of offlineAccess we now ask for
-                    %% an extension.
-                    ExtensionResult = 
-                        request_access_token_extension(ClientID, ClientSecret, AccessToken),
-                    case ExtensionResult of
-                        {ok, NewToken} ->
-                            ?LOG_DEBUG("Extended access token. New token: ~p", [NewToken]),
-                            xo_auth:create_user_doc_response(
-                              Req, RedirectUri,
-                              xo_auth:create_user_doc(FBUsername, <<"facebook">>, ID, NewToken, []));
-                        Error ->
-                            ?LOG_INFO("Failed to extend expiration of token: ~p", [Error]),
-                            couch_httpd:send_json(Req, 403, [], {[{error, <<"Failed to extend expiration of token">>}]})
-                    end
-
-            end;
-
-
-        {Result} ->
-            ?LOG_DEBUG("View result is ~p", [Result]),
-            DocID = couch_util:get_value(<<"user_id">>, Result, []),
-            Name = couch_util:get_value(<<"name">>, Result, []),
-
-            case couch_config:get("fb", "store_access_token", "false") of
-                "false" ->
-                    xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
-
-                _ ->
-                    OldAccessToken = couch_util:get_value(<<"access_token">>, Result, []),
-                    case request_access_token_extension(ClientID, ClientSecret, AccessToken) of
-                        {ok, ExtendedToken} ->
-                            xo_auth:update_access_token(DocID, <<"facebook">>, OldAccessToken, ?l2b(ExtendedToken)),
-                            xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
-                        Error ->
-                            ?LOG_INFO("Failed to extend token: ~p", [Error]),
-                            couch_httpd:send_json(Req, 403, [], {[{error, <<"Failed to extend expiration of token">>}]})
-                    end
-            end;
-
-        {error, Reason} ->
-            couch_httpd:send_json(Req, 403, [], {[{<<"xo_auth">>, Reason}]})
-    end;
-create_or_update_user(Req, ClientID, _, _, Error) ->
-    ?LOG_DEBUG("Non-success from request_facebook_graphme_info call for client ~p: ~p", [ClientID, Error]),
-    couch_httpd:send_json(Req, 403, [], {[{error, <<"Failed graphme request">>}]}).
+    xo_auth:generate_cookied_response_json(?l2b(Username), Req, RedirectUri).
 
 request_facebook_graphme_info(AccessToken) ->
     %% Construct the URL to access the graph API's /me page
@@ -119,11 +92,11 @@ process_facebook_graphme_response(Resp) ->
             %% Decode the facebook response body, extracting the
             %% ID and the complete response.
             {FBInfo}=?JSON_DECODE(Body),
-            ID=couch_util:get_value(<<"id">>, FBInfo),
-            FBUsername=couch_util:get_value(<<"username">>, FBInfo),
+            ID = ?b2l(couch_util:get_value(<<"id">>, FBInfo)),
+            FBUsername = ?b2l(couch_util:get_value(<<"username">>, FBInfo)),
             {ok, ID, FBUsername};
         _ ->
-            {error, "Non 200 response from facebook"}
+            throw(non_200_from_graphme)
     end.
 
 request_facebook_access_token(ClientAppToken, RedirectURI, ClientID, ClientSecret, FBCode) ->
@@ -167,19 +140,18 @@ process_facebook_access_token(Resp) ->
     end.
 
 request_access_token_extension(ClientID, ClientSecret, Token) ->
-    %% Construct the request URL.
-    Url="https://graph.facebook.com/oauth/access_token?client_id="++ClientID++"&client_secret="++ClientSecret++"&grant_type=fb_exchange_token&fb_exchange_token="++Token,
+    Url="https://graph.facebook.com/oauth/access_token?client_id=" ++ 
+        ClientID ++ 
+        "&client_secret=" ++ 
+        ClientSecret ++
+        "&grant_type=fb_exchange_token&fb_exchange_token=" ++ 
+        Token,
     ?LOG_DEBUG("request_access_token_extension: requesting using URL - ~p", [Url]),
 
     %% Request the page
     Resp=ibrowse:send_req(Url, [], get, []),
     ?LOG_DEBUG("Full response from Facebook: ~p", [Resp]),
 
-    process_access_token_extension(Resp).
-
-    
-process_access_token_extension(Resp) ->
-    %% Extract the info we need
     case Resp of 
         {ok, "200", _, Body} ->
             Props = mochiweb_util:parse_qs(Body),
@@ -189,10 +161,11 @@ process_access_token_extension(Resp) ->
                     {ok, NewAccessToken};
                 _ ->
                     ?LOG_DEBUG("process_access_token_extension: unexpected response: ~p", [Body]),
-                    {error, "Unexpected body response from facebook"}
+                    throw(could_not_extend_token)
             end;
         _ ->
             ?LOG_DEBUG("process_access_token_extension: non 200 response of: ~p", [Resp]),
-            {error, "Non 200 response from facebook"}
+            throw(could_not_extend_token)
     end.
+    
 

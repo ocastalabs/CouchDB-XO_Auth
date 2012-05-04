@@ -1,15 +1,11 @@
 -module(xo_auth).
 
 -export([generate_cookied_response_json/3]).
--export([check_user_database/2]).
--export([create_user_skeleton/1, create_user_doc/3, create_user_doc/5]).
--export([update_service_details/3, update_service_details/5]).
--export([user_doc_exists/1]).
--export([create_user_doc_response/3]).
--export([update_access_token/4]).
--export([update_access_token/5]).
+-export([determine_username/4]).
+-export([update_service_details/3, 
+         update_service_details/4, 
+         update_service_details/5]).
 -export([extract_config_values/2]).
--export([get_auth_session_username/1]).
 
 -include_lib("couch/include/couch_db.hrl").
 -include("xo_auth.hrl").
@@ -65,60 +61,6 @@ check_user_database(ServiceName, ID) ->
         couch_db:close(Db)
     end.
 
-create_user_doc(Username, ServiceName, UserID) ->
-    create_user_doc(Username, ServiceName, UserID, [], []).
-
-create_user_doc(Username, ServiceName, UserID, AccessToken, AccessTokenSecret) ->
-
-    %% Create user auth doc with access token
-    TrimmedName = re:replace(Username, "[^A-Za-z0-9_-]", "", [global, {return, list}]),
-    ?LOG_DEBUG("Trimmed name is ~p", [TrimmedName]),
-    Db = open_auth_db(),
-    try 
-
-        Name = get_unused_name(Db, TrimmedName),
-        ?LOG_DEBUG("Proceeding with name ~p", [Name]),
-        %% Generate a _users record with the appropriate
-        %% Service Record eg:
-        %% "facebook" : {"id" : "123456"", "access_token": "ABDE485864030DF73277E"}
-        FullID=?l2b("org.couchdb.user:"++Name),
-
-        %% Add the access token and secret if they are non-empty
-        CommonServiceDetails = [{<<"id">>, UserID}],
-        ServiceDetails = {lists:foldl(fun({_Key, <<>>}, Acc) ->
-                                              Acc;
-                                         (Pair, Acc) ->
-                                              [Pair|Acc]
-                                      end,
-                                      CommonServiceDetails,
-                                      [{<<"access_token">>,  ?l2b(AccessToken)},
-                                       {<<"access_token_secret">>, ?l2b(AccessTokenSecret)}])},
-
-        Salt=couch_uuids:random(),
-        NewDoc = #doc{
-          id=FullID,
-          body={[
-                 {<<"_id">>, FullID},
-                 {<<"salt">>, Salt},
-                 {ServiceName, ServiceDetails},
-                 {<<"name">>, ?l2b(Name)},
-                 {<<"roles">>, []},
-                 {<<"type">>, <<"user">>}
-                ]}
-         },
-        %% See above for Validation reasoning
-        DbWithoutValidationFunc = Db#db{ validate_doc_funs=[] },
-        case couch_db:update_doc(DbWithoutValidationFunc, NewDoc, []) of
-            {ok, _} ->
-                ?LOG_DEBUG("User doc created for ~p:~p", [Name, FullID]),
-                {ok, Name};
-            Error ->
-                ?LOG_ERROR("Could not create user doc for ~p:~p", [Name, FullID]),
-                Error
-        end
-    after
-        couch_db:close(Db)
-    end.
 
 user_doc_exists(Username) ->
     Db = open_auth_db(),
@@ -132,6 +74,48 @@ user_doc_exists(Username) ->
         end
     after
         couch_db:close(Db)
+    end.
+
+%%
+%% Determine the username from the request and the token response.
+%% If there is an authenticated session user, that user is used. If the
+%% user is new, the username will be determined from the username of the
+%% service.
+%%
+determine_username(Req, Provider, ProviderID, ProviderUsername) ->
+    case get_auth_session_username(Req) of
+        undefined -> 
+            ?LOG_DEBUG("No auth session for user - creating new account", []),
+            {ok, _DocID, NewUsername} = create_user_skeleton(ProviderUsername),
+            NewUsername;
+        SessionUsername ->
+            ?LOG_DEBUG("Auth session found. Adding service to user: ~p", [SessionUsername]),
+
+            %% If there is already a account registered with this username, 
+            %% it must be this user (otherwise multiple users could register with the
+            %% same provider ID).
+            case check_user_database(?l2b(Provider), ?l2b(ProviderID)) of
+                {Result} ->
+                    ?LOG_DEBUG("!!!! ~p ~p:~p", [Result, ?l2b(Provider), ?l2b(ProviderID)]),
+                    
+                    case couch_util:get_value(<<"name">>, Result, []) of
+                        SessionUsername ->
+                            SessionUsername;
+                        _ ->
+                            throw(account_already_associated_with_another_user)
+                    end;
+                X ->
+                    ?LOG_DEBUG("!!!! ~p ~p:~p", [X, ?l2b(Provider), ?l2b(ProviderID)]),
+                    %% The subsequent code is base on the fact that the document for the user
+                    %% should exist. If the browser for some reason has a cookie for a user that 
+                    %% doesn't exist in the db, fail nicely
+                    case user_doc_exists(SessionUsername) of
+                        false ->
+                            throw(no_document_for_user);
+                        true ->
+                            SessionUsername
+                    end
+            end
     end.
 
 create_user_skeleton(UsernamePrototype) ->
@@ -174,6 +158,9 @@ create_user_skeleton(UsernamePrototype) ->
 update_service_details(Username, ServiceName, ServiceUserID) ->
     update_service_details(Username, ServiceName, ServiceUserID, [], []).
 
+update_service_details(Username, ServiceName, ServiceUserID, AccessToken) ->
+    update_service_details(Username, ServiceName, ServiceUserID, AccessToken, []).
+
 update_service_details(Username, ServiceName, ServiceUserID, AccessToken, AccessTokenSecret) ->
     Db = open_auth_db(),
     DocID = "org.couchdb.user:" ++ Username,
@@ -196,8 +183,6 @@ update_service_details(Username, ServiceName, ServiceUserID, AccessToken, Access
                                                [{?ACCESS_TOKEN, ?l2b(AccessToken)},
                                                 {?ACCESS_TOKEN_SECRET, ?l2b(AccessTokenSecret)}])},
 
-                ?LOG_DEBUG("Updated Service Details ~p", [ServiceDetails1]),
-
                 NewDocBody = ?replace(DocBody, ?l2b(ServiceName), ServiceDetails1),
                 ?LOG_DEBUG("Updated Body: ~p", [NewDocBody]),
                 
@@ -210,62 +195,6 @@ update_service_details(Username, ServiceName, ServiceUserID, AccessToken, Access
             _ ->
                 ?LOG_ERROR("No doc found for Doc ID ~p.", [DocID]),
                 throw(document_not_found_for_user)
-        end
-    catch throw:conflict ->
-            %% Shouldn't happen but you can never be too careful
-            ?LOG_ERROR("Conflict error when updating user document ~p.", [DocID])
-    after
-        couch_db:close(Db)
-    end.
-
-create_user_doc_response(Req, RedirectUri, {ok, Name}) ->
-    %% Finally send a response that includes the AuthSession cookie
-    generate_cookied_response_json(?l2b(Name), Req, RedirectUri);
-create_user_doc_response(Req, _RedirectUri, _Error) ->
-    couch_httpd:send_json(Req, 403, [], {[{error, <<"Unable to update doc">>}]}).
-
-update_access_token(DocID, ServiceName, OldAccessToken, AccessToken) ->
-    update_access_token(DocID, ServiceName, OldAccessToken, AccessToken, <<>>).
-
-update_access_token(_DocID, _ServiceName, OldAccessToken, AccessToken, _AccessTokenSecret) 
-  when OldAccessToken =:= AccessToken ->
-    ?LOG_DEBUG("Tokens are identical", []),
-    ok;
-update_access_token(DocID, ServiceName, _OldAccessToken, AccessToken, AccessTokenSecret) ->
-    Db = open_auth_db(),
-
-    %% Update a _users record with a new access key
-    try
-        case (catch couch_db:open_doc(Db, DocID, [ejson_body])) of
-            {ok, Doc} ->
-                {DocBody} = Doc#doc.body,
-                ?LOG_DEBUG("User doc ~p exists.", [DocID]),
-                {ServiceDetails} = couch_util:get_value(ServiceName, DocBody, []),
-                ?LOG_DEBUG("Extracted Service Details ~p", [ServiceDetails]),
-
-                %% Update values that are not empty
-                ServiceDetails1 = {lists:foldl(fun({_Key, <<>>}, Acc) ->
-                                                       Acc;
-                                                  ({Key, Value}, Acc) ->
-                                                       ?replace(Acc, Key, Value)
-                                               end,
-                                               ServiceDetails,
-                                               [{?ACCESS_TOKEN, AccessToken},
-                                                {?ACCESS_TOKEN_SECRET, AccessTokenSecret}])},
-
-                ?LOG_DEBUG("Updated Service Details ~p", [ServiceDetails1]),
-
-                NewDocBody = ?replace(DocBody, ServiceName, ServiceDetails1),
-                ?LOG_DEBUG("Updated Body: ~p", [NewDocBody]),
-                
-                %% To prevent the validation functions for the db taking umbrage at our
-                %% behind the scenes twiddling, we blank them out.
-                %% NOTE: Potentially fragile. Possibly dangerous?
-                DbWithoutValidationFunc = Db#db{ validate_doc_funs=[] },
-                couch_db:update_doc(DbWithoutValidationFunc, Doc#doc{body = {NewDocBody}}, []);
-            _ ->
-                ?LOG_DEBUG("No doc found for Doc ID ~p.", [DocID]),
-                nil
         end
     catch throw:conflict ->
             %% Shouldn't happen but you can never be too careful

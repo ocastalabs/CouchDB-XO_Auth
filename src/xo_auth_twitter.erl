@@ -38,11 +38,11 @@ handle_twitter_req(#httpd{method='GET'}=Req) ->
         throw:could_not_create_user_skeleton ->
             couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not create user skeleton">>}]});
         throw:account_already_associated_with_another_user ->
-            couch_httpd:send_json(Req, 403, [], {[{error, <<"Twitter account registered with another user">>}]});
+            couch_httpd:send_json(Req, 400, [], {[{error, <<"Twitter account registered with another user">>}]});
         throw:non_200_response_from_twitter ->
             couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not get access token from Twitter">>}]});
         throw:no_document_for_user ->
-            couch_httpd:send_json(Req, 403, [], {[{error, <<"No users exists for auth session cookie">>}]});
+            couch_httpd:send_json(Req, 403, [], {[{error, <<"No user exists for auth session cookie">>}]});
         throw:document_not_found_for_user ->
             couch_httpd:send_json(Req, 500, [], {[{error, <<"Document not found for user">>}]})
     end;
@@ -103,45 +103,13 @@ handle_twitter_callback(Req, RequestToken, Verifier) ->
     AccessTokenResponse = process_twitter_access_token_response(Resp),
     create_or_update_user(Req, AccessTokenResponse).
 
-create_or_update_user(Req, {ok, AccessToken, AccessTokenSecret, ScreenName, TwitterUserID}) ->
-    Username = 
-        case xo_auth:get_auth_session_username(Req) of
-            undefined -> 
-                ?LOG_DEBUG("No auth session for user - creating new account", []),
-                {ok, _DocID, NewUsername} = xo_auth:create_user_skeleton(ScreenName),
-                NewUsername;
-            SessionUsername ->
-                ?LOG_DEBUG("Auth session found. Adding service to user: ~p", [SessionUsername]),
-                %% If there is already a twitter account registered with this username, 
-                %% it must be this user (otherwise multiple users could register with the
-                %% same twitter ID.
-                case xo_auth:check_user_database(<<"twitter">>, ?l2b(ScreenName)) of
-                    {Result} ->
-                        case couch_util:get_value(<<"name">>, Result, []) of
-                            SessionUsername ->
-                                SessionUsername;
-                            _ ->
-                                throw(account_already_associated_with_another_user)
-                        end;
-                    _ ->
-                        %% The subsequent code is base on the fact that the document for the user
-                        %% should exist. If the browser for some reason has a cookie for a user that 
-                        %% doesn't exist in the db, fail nicely
-                        case xo_auth:user_doc_exists(SessionUsername) of
-                            false ->
-                                throw(no_document_for_user);
-                            true ->
-                                SessionUsername
-                        end
-                end
-        end,
-                 
-    
+create_or_update_user(Req, {ok, AccessToken, AccessTokenSecret, TwitterUsername, TwitterUserID}) ->
+    Username = xo_auth:determine_username(Req, "twitter", TwitterUserID, TwitterUsername),
     ok = case couch_config:get("twitter", "store_access_token", "false") of
-             "false" ->
-                 xo_auth:update_service_details(Username, "twitter", TwitterUserID);
+             "true" ->
+                 xo_auth:update_service_details(Username, "twitter", TwitterUserID, AccessToken, AccessTokenSecret);
              _ ->
-                 xo_auth:update_service_details(Username, "twitter", TwitterUserID, AccessToken, AccessTokenSecret)
+                 xo_auth:update_service_details(Username, "twitter", TwitterUserID)
          end,
     
     RedirectUri = couch_config:get("twitter", "client_app_uri", nil),
