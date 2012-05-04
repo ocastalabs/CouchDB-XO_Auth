@@ -11,26 +11,40 @@
   
 %% Exported functions
 handle_twitter_req(#httpd{method='GET'}=Req) ->
-    %% Did we get a 'code' or 'error' back from twitter?
-    case couch_httpd:qs_value(Req, "oauth_token") of
-        undefined ->
-            case couch_httpd:qs_value(Req, "denied") of
-                undefined ->
-                    %% If there's no token and no denied value then assume this is the inital request
-                    request_twitter_request_token(Req);
-                _ ->
-                    couch_httpd:send_json(Req, 403, [], {[{error, <<"User denied Needz access to Twitter account">>}]})
+
+    try 
+        %% Did we get a 'code' or 'error' back from twitter?
+        case couch_httpd:qs_value(Req, "oauth_token") of
+            undefined ->
+                case couch_httpd:qs_value(Req, "denied") of
+                    undefined ->
+                        %% If there's no token and no denied value then assume this is the inital request
+                        request_twitter_request_token(Req);
+                    _ ->
+                        couch_httpd:send_json(Req, 403, [], {[{error, <<"User denied Needz access to Twitter account">>}]})
                 end;
-                
-        RequestToken -> 
-            %% If there's a token and verifier then Twitter has authenticated the user
-            case couch_httpd:qs_value(Req, "oauth_verifier") of
-                undefined ->
-                    ?LOG_DEBUG("No verifier found on Twitter callback: ~p", [Req]),
-                    couch_httpd:send_json(Req, 403, [], {[{error, <<"No code supplied">>}]});
-                Verifier -> 
-                    handle_twitter_callback(Req, RequestToken, Verifier)
-            end
+
+            RequestToken -> 
+                %% If there's a token and verifier then Twitter has authenticated the user
+                case couch_httpd:qs_value(Req, "oauth_verifier") of
+                    undefined ->
+                        ?LOG_DEBUG("No verifier found on Twitter callback: ~p", [Req]),
+                        couch_httpd:send_json(Req, 403, [], {[{error, <<"No code supplied">>}]});
+                    Verifier -> 
+                        handle_twitter_callback(Req, RequestToken, Verifier)
+                end
+        end
+    catch 
+        throw:could_not_create_user_skeleton ->
+            couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not create user skeleton">>}]});
+        throw:account_already_associated_with_another_user ->
+            couch_httpd:send_json(Req, 403, [], {[{error, <<"Twitter account registered with another user">>}]});
+        throw:non_200_response_from_twitter ->
+            couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not get access token from Twitter">>}]});
+        throw:no_document_for_user ->
+            couch_httpd:send_json(Req, 403, [], {[{error, <<"No users exists for auth session cookie">>}]});
+        throw:document_not_found_for_user ->
+            couch_httpd:send_json(Req, 500, [], {[{error, <<"Document not found for user">>}]})
     end;
 handle_twitter_req(Req) ->
     couch_httpd:send_method_not_allowed(Req, "GET").
@@ -46,15 +60,8 @@ request_twitter_request_token(Req) ->
     OAuthUrl = oauth:uri(Url, SignedParams),
     Resp = ibrowse:send_req(OAuthUrl, [], get, []),
 
-    case process_request_token_response(Req, Resp) of   
-        {ok, RedirectURL, Headers} ->
-            couch_httpd:send_json(Req, 302, [{"Location", RedirectURL}] ++ Headers, {[]});
-                
-        Error ->
-            ?LOG_DEBUG("Non-success from request_twitter_request_token call: ~p", [Error]),
-            couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not get access token">>}]})
-
-    end.
+    {ok, RedirectURL, Headers} = process_request_token_response(Req, Resp),
+    couch_httpd:send_json(Req, 302, [{"Location", RedirectURL}] ++ Headers, {[]}).
 
 process_request_token_response(Req, Response) ->
     %% Extract Request Token from body and generate authenticate URL
@@ -63,19 +70,19 @@ process_request_token_response(Req, Response) ->
             RequestParams = mochiweb_util:parse_qs(Body),
             RequestToken = oauth:token(RequestParams),
             RequestSecret = oauth:token_secret(RequestParams),
-                
+            
             AuthenticateUrl = "https://api.twitter.com/oauth/authenticate?oauth_token=" ++ RequestToken,
             ?LOG_DEBUG("obtain_twitter_request_token - redirecting to ~p", [AuthenticateUrl]),
-
+            
             %% Redirect the client to the Twitter Oauth page
             %% We will need the token secret twitter just gave us when
             %% trying to get an access_token so we need to put it
             %% in a cookie.
             {ok, AuthenticateUrl, [token_cookie(Req, RequestSecret)]};
-                
-    _ ->
-        ?LOG_DEBUG("process_twitter_request_token: non 200 response of: ~p", [Response]),
-        {error, "Non 200 response from Twitter"}
+        
+        _ ->
+            ?LOG_ERROR("process_twitter_request_token: non 200 response of: ~p", [Response]),
+            throw(non_200_response_from_twitter)
     end.
     
 
@@ -86,6 +93,7 @@ handle_twitter_callback(Req, RequestToken, Verifier) ->
     
     RequestTokenSecret = get_token_secret_from_cookie(Req),
     ?LOG_DEBUG("Requesting Access Token with Token: ~p  TokenSecret: ~p", [RequestToken, RequestTokenSecret]),
+    ?LOG_DEBUG("Requesting Access Token with ConsumerKey: ~p  ConsumerSecret: ~p", [ConsumerKey, ConsumerSecret]),
     
     URL="https://api.twitter.com/oauth/access_token",
     SignedParams = oauth:signed_params("GET", URL, [{"oauth_verifier", Verifier}], {ConsumerKey, ConsumerSecret, hmac_sha1}, RequestToken, RequestTokenSecret),     
@@ -95,42 +103,49 @@ handle_twitter_callback(Req, RequestToken, Verifier) ->
     AccessTokenResponse = process_twitter_access_token_response(Resp),
     create_or_update_user(Req, AccessTokenResponse).
 
-create_or_update_user(Req, {ok, AccessToken, AccessTokenSecret, ScreenName, UserID}) ->
+create_or_update_user(Req, {ok, AccessToken, AccessTokenSecret, ScreenName, TwitterUserID}) ->
+    Username = 
+        case xo_auth:get_auth_session_username(Req) of
+            undefined -> 
+                ?LOG_DEBUG("No auth session for user - creating new account", []),
+                {ok, _DocID, NewUsername} = xo_auth:create_user_skeleton(ScreenName),
+                NewUsername;
+            SessionUsername ->
+                ?LOG_DEBUG("Auth session found. Adding service to user: ~p", [SessionUsername]),
+                %% If there is already a twitter account registered with this username, 
+                %% it must be this user (otherwise multiple users could register with the
+                %% same twitter ID.
+                case xo_auth:check_user_database(<<"twitter">>, ?l2b(ScreenName)) of
+                    {Result} ->
+                        case couch_util:get_value(<<"name">>, Result, []) of
+                            SessionUsername ->
+                                SessionUsername;
+                            _ ->
+                                throw(account_already_associated_with_another_user)
+                        end;
+                    _ ->
+                        %% The subsequent code is base on the fact that the document for the user
+                        %% should exist. If the browser for some reason has a cookie for a user that 
+                        %% doesn't exist in the db, fail nicely
+                        case xo_auth:user_doc_exists(SessionUsername) of
+                            false ->
+                                throw(no_document_for_user);
+                            true ->
+                                SessionUsername
+                        end
+                end
+        end,
+                 
+    
+    ok = case couch_config:get("twitter", "store_access_token", "false") of
+             "false" ->
+                 xo_auth:update_service_details(Username, "twitter", TwitterUserID);
+             _ ->
+                 xo_auth:update_service_details(Username, "twitter", TwitterUserID, AccessToken, AccessTokenSecret)
+         end,
+    
     RedirectUri = couch_config:get("twitter", "client_app_uri", nil),
-    case xo_auth:check_user_database(<<"twitter">>, ?l2b(UserID)) of
-        nil ->
-            ?LOG_DEBUG("No user for for Twitter ID: ~p", [UserID]),
-            case couch_config:get("twitter", "store_access_token", "false") of
-                "false" ->
-                    xo_auth:create_user_doc_response(
-                      Req, RedirectUri, 
-                      xo_auth:create_user_doc(ScreenName, <<"twitter">>, ?l2b(UserID)));
-                _ -> 
-                    xo_auth:create_user_doc_response(
-                      Req, RedirectUri,
-                      xo_auth:create_user_doc(ScreenName, <<"twitter">>, ?l2b(UserID), AccessToken, AccessTokenSecret))
-            end;
-
-        {Result} ->
-            ?LOG_DEBUG("View result is ~p", [Result]),
-            DocID = couch_util:get_value(<<"user_id">>, Result, []),
-            Name = couch_util:get_value(<<"name">>, Result, []),
-
-            case couch_config:get("twitter", "store_access_token", "false") of
-                "false" ->
-                    xo_auth:generate_cookied_response_json(Name, Req, RedirectUri);
-                _ ->
-                    OldAccessToken = couch_util:get_value(<<"access_token">>, Result, []),
-                    xo_auth:update_access_token(DocID, <<"twitter">>, OldAccessToken, ?l2b(AccessToken), ?l2b(AccessTokenSecret)),
-                    xo_auth:generate_cookied_response_json(Name, Req, RedirectUri)
-            end;
-        
-        {error, Reason} ->
-            couch_httpd:send_json(Req, 403, [], {[{<<"xo_auth">>, Reason}]})
-    end;
-create_or_update_user(Req, Error) ->
-    ?LOG_DEBUG("Non-success from request_twitter_access_token call: ~p", [Error]),
-    couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not get access token">>}]}).
+    xo_auth:generate_cookied_response_json(?l2b(Username), Req, RedirectUri).
 
 
 get_token_secret_from_cookie(#httpd{mochi_req=MochiReq}=Req) ->
@@ -161,8 +176,8 @@ process_twitter_access_token_response(Response) ->
             {ok, AccessToken, AccessTokenSecret, ScreenName, UserID};
                 
         _ ->
-            ?LOG_DEBUG("process_twitter_request_token: non 200 response of: ~p", [Response]),
-            {error, "Non 200 response from Twitter"}
+            ?LOG_ERROR("process_twitter_request_token: non 200 response of: ~p", [Response]),
+            throw(non_200_response_from_twitter)
     end.
    
 screen_name(Params) ->
