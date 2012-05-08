@@ -1,7 +1,6 @@
 -define(XREFBYID_MAP_FUN, <<"
 function(doc) {
-    if (doc.type === 'user')
-       if (doc.facebook)
+    if (doc.type === 'user') {
         if (doc.facebook) {
             obj = {
                 'user_id' : doc._id,
@@ -18,5 +17,6 @@ function(doc) {
             }
             emit(['twitter', doc.twitter.id], obj);
         }
+    }
 }
 ">>).

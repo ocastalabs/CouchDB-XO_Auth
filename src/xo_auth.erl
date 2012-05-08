@@ -62,20 +62,6 @@ check_user_database(ServiceName, ID) ->
     end.
 
 
-user_doc_exists(Username) ->
-    Db = open_auth_db(),
-    try 
-        DocID=?l2b("org.couchdb.user:" ++ Username),
-        case (catch couch_db:open_doc(Db, DocID, [ejson_body])) of
-            {ok, _Doc} ->
-                true;
-            _ ->
-                false
-        end
-    after
-        couch_db:close(Db)
-    end.
-
 %%
 %% Determine the username from the request and the token response.
 %% If there is an authenticated session user, that user is used. If the
@@ -83,35 +69,28 @@ user_doc_exists(Username) ->
 %% service.
 %%
 determine_username(Req, Provider, ProviderID, ProviderUsername) ->
-    case get_auth_session_username(Req) of
+    case get_username_from_request(Req) of
         undefined -> 
             ?LOG_DEBUG("No auth session for user - creating new account", []),
             {ok, _DocID, NewUsername} = create_user_skeleton(ProviderUsername),
             NewUsername;
-        SessionUsername ->
-            ?LOG_DEBUG("Auth session found. Adding service to user: ~p", [SessionUsername]),
+        ExistingUsername ->
+            ?LOG_DEBUG("Auth session found. Adding service to user: ~p", [ExistingUsername]),
 
             %% If there is already a account registered with this username, 
             %% it must be this user (otherwise multiple users could register with the
             %% same provider ID).
             case check_user_database(?l2b(Provider), ?l2b(ProviderID)) of
                 {Result} ->
-                    case couch_util:get_value(<<"name">>, Result, []) of
-                        SessionUsername ->
-                            SessionUsername;
-                        _ ->
+                    case ?b2l(couch_util:get_value(<<"name">>, Result, [])) of
+                        ExistingUsername ->
+                            ExistingUsername;
+                        Other ->
+                            ?LOG_ERROR("Existing: ~p Other: ~p", [ExistingUsername, Other]),
                             throw(account_already_associated_with_another_user)
                     end;
                 _ ->
-                    %% The subsequent code is base on the fact that the document for the user
-                    %% should exist. If the browser for some reason has a cookie for a user that 
-                    %% doesn't exist in the db, fail nicely
-                    case user_doc_exists(SessionUsername) of
-                        false ->
-                            throw(no_document_for_user);
-                        true ->
-                            SessionUsername
-                    end
+                    ExistingUsername
             end
     end.
 
@@ -266,14 +245,10 @@ extract_config_values(Category, Keys) ->
                       end
               end, Keys).
 
-get_auth_session_username(#httpd{ mochi_req = MochiReq }) ->
-    case MochiReq:get_cookie_value("AuthSession") of
-        undefined -> 
-            undefined;
-        [] -> 
-            undefined;
-        Cookie ->
-            AuthSession = couch_util:decodeBase64Url(Cookie),
-            [User, _, _] = string:tokens(?b2l(AuthSession), ":"),
-            User
+get_username_from_request(#httpd{ user_ctx=UserCtx }) ->
+    case UserCtx of
+        #user_ctx{name=Username} -> 
+            ?b2l(Username);
+        _ ->
+            undefined
     end.
