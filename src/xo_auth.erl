@@ -71,9 +71,16 @@ check_user_database(ServiceName, ID) ->
 determine_username(Req, Provider, ProviderID, ProviderUsername) ->
     case get_username_from_request(Req) of
         undefined -> 
-            ?LOG_DEBUG("No auth session for user - creating new account", []),
-            {ok, _DocID, NewUsername} = create_user_skeleton(ProviderUsername),
-            NewUsername;
+            %% No other account may be associated already
+            case check_user_database(?l2b(Provider), ?l2b(ProviderID)) of
+                {Result} ->
+                    ?b2l(couch_util:get_value(<<"name">>, Result, []));
+                _ ->
+                    ?LOG_DEBUG("Not an existing user - creating new account", []),
+                    {ok, _DocID, NewUsername} = create_user_skeleton(ProviderUsername),
+                    NewUsername
+            end;
+        
         ExistingUsername ->
             ?LOG_DEBUG("Auth session found. Adding service to user: ~p", [ExistingUsername]),
 
@@ -85,8 +92,7 @@ determine_username(Req, Provider, ProviderID, ProviderUsername) ->
                     case ?b2l(couch_util:get_value(<<"name">>, Result, [])) of
                         ExistingUsername ->
                             ExistingUsername;
-                        Other ->
-                            ?LOG_ERROR("Existing: ~p Other: ~p", [ExistingUsername, Other]),
+                        _ ->
                             throw(account_already_associated_with_another_user)
                     end;
                 _ ->
@@ -247,7 +253,7 @@ extract_config_values(Category, Keys) ->
 
 get_username_from_request(#httpd{ user_ctx=UserCtx }) ->
     case UserCtx of
-        #user_ctx{name=Username} -> 
+        #user_ctx{name=Username} when Username =/= null -> 
             ?b2l(Username);
         _ ->
             undefined
