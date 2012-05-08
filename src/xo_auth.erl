@@ -22,7 +22,7 @@ generate_cookied_response_json(Name, Req, RedirectUri) ->
     %% NOTE: This could be fragile! If couch_httpd_auth.erl changes the way it handles
     %%       auth cookie then this code will break. However, couch_httpd_auth.erl doesn't
     %%       seem to expose enough method for us to make it do all the work.
-    User = case couch_auth_cache:get_user_creds(Name) of
+    User = case couch_auth_cache:get_user_creds(?l2b(Name)) of
         nil -> [];
         Result -> Result
     end,
@@ -37,7 +37,7 @@ generate_cookied_response_json(Name, Req, RedirectUri) ->
 
     %% Create a json response containing some useful info and the AuthSession
     %% cookie.
-    Cookie = couch_httpd_auth:cookie_auth_header(Req#httpd{user_ctx=#user_ctx{name=Name},auth={<<Secret/binary,UserSalt/binary>>,true}},[]),
+    Cookie = couch_httpd_auth:cookie_auth_header(Req#httpd{user_ctx=#user_ctx{name=?l2b(Name)},auth={<<Secret/binary,UserSalt/binary>>,true}},[]),
     couch_httpd:send_json(Req, 302, [{"Location", RedirectUri}] ++ Cookie, nil).
 
 check_user_database(ServiceName, ID) ->

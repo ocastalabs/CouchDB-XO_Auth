@@ -72,7 +72,7 @@ create_or_update_user(Req, ClientID, ClientSecret, AccessToken, {ok, FacebookUse
          end,
                  
     RedirectUri = couch_config:get("fb", "client_app_uri", nil),
-    xo_auth:generate_cookied_response_json(?l2b(Username), Req, RedirectUri).
+    xo_auth:generate_cookied_response_json(Username, Req, RedirectUri).
 
 request_facebook_graphme_info(AccessToken) ->
     %% Construct the URL to access the graph API's /me page

@@ -113,7 +113,7 @@ create_or_update_user(Req, {ok, AccessToken, AccessTokenSecret, TwitterUsername,
          end,
     
     RedirectUri = couch_config:get("twitter", "client_app_uri", nil),
-    xo_auth:generate_cookied_response_json(?l2b(Username), Req, RedirectUri).
+    xo_auth:generate_cookied_response_json(Username, Req, RedirectUri).
 
 
 get_token_secret_from_cookie(#httpd{mochi_req=MochiReq}=Req) ->
