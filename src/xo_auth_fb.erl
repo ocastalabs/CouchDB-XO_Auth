@@ -1,5 +1,6 @@
 -module(xo_auth_fb).
 -export([handle_fb_req/1]).
+-export([convert_name_to_username/1]).
 -include_lib("couch/include/couch_db.hrl").
 
 %% This module handles Facebook signin and _user document creation.
@@ -76,7 +77,7 @@ create_or_update_user(Req, ClientID, ClientSecret, AccessToken, {ok, FacebookUse
 
 request_facebook_graphme_info(AccessToken) ->
     %% Construct the URL to access the graph API's /me page
-    Url="https://graph.facebook.com/me?fields=id,username&access_token="++AccessToken,
+    Url="https://graph.facebook.com/me?fields=id,username,name&access_token="++AccessToken,
     ?LOG_DEBUG("Url=~p",[Url]),
 
     %% Request the page
@@ -93,8 +94,13 @@ process_facebook_graphme_response(Resp) ->
             %% ID and the complete response.
             {FBInfo}=?JSON_DECODE(Body),
             ID = ?b2l(couch_util:get_value(<<"id">>, FBInfo)),
-            FBUsername = ?b2l(couch_util:get_value(<<"username">>, FBInfo)),
-            {ok, ID, FBUsername};
+            Username = case couch_util:get_value(<<"username">>, FBInfo) of
+                           undefined ->
+                               convert_name_to_username(?b2l(couch_util:get_value(<<"name">>, FBInfo)));
+                           FBUsername ->
+                               ?b2l(FBUsername)
+                       end,
+            {ok, ID, Username};
         _ ->
             throw(non_200_from_graphme)
     end.
@@ -168,4 +174,23 @@ request_access_token_extension(ClientID, ClientSecret, Token) ->
             throw(could_not_extend_token)
     end.
     
+-define(INVALID_CHARS, "&%+,./:;=?@ <>#%|\\[]{}~^`'").
 
+convert_name_to_username(Name) ->
+    Trimmed = lists:foldr(fun(Char, Acc) ->
+                                  case lists:member(Char, ?INVALID_CHARS) of
+                                      true ->
+                                          Acc;
+                                      false ->
+                                          [Char|Acc]
+                                  end
+                          end,
+                          "",
+                          string:to_lower(Name)),
+    case Trimmed of 
+        "" -> throw({no_username_possible_from_name, Name});
+        Valid -> Valid
+    end.
+             
+        
+                             
