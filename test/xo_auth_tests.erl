@@ -6,7 +6,7 @@ illegal_prefix_test_() ->
      fun() -> 
              meck:new(couch_config, []),
              meck:expect(couch_config, get, fun("xo_auth", "illegal_username_prefixes") ->
-                                                    ["foo", "bar"];
+                                                    "foo,bar";
                                                ("xo_auth", "illegal_username_prepend") ->
                                                     "prep_"
                                             end)
@@ -17,6 +17,7 @@ illegal_prefix_test_() ->
      fun(_) ->
              [
               ?_assertEqual("ben", xo_auth:apply_username_restrictions("ben")),
+              ?_assertEqual("myneedz1", xo_auth:apply_username_restrictions("MyNeedz1")),
               ?_assertEqual("prep_fooben", xo_auth:apply_username_restrictions("fooben")),
               ?_assertEqual("prep_barben", xo_auth:apply_username_restrictions("barben")),
               ?_assert(meck:validate(couch_config))
@@ -48,7 +49,7 @@ missing_config_test_() ->
      fun() -> 
              meck:new(couch_config, []),
              meck:expect(couch_config, get, fun("xo_auth", "illegal_username_prefixes") ->
-                                                    ["foo"];
+                                                    "foo";
                                                ("xo_auth", "illegal_username_prepend") ->
                                                     undefined
                                             end)

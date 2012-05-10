@@ -260,20 +260,24 @@ get_username_from_request(#httpd{ user_ctx=UserCtx }) ->
             undefined
     end.
 
-apply_username_restrictions(Username) ->
+apply_username_restrictions(UncasedUsername) ->
+    Username = string:to_lower(UncasedUsername),
     case {couch_config:get("xo_auth", "illegal_username_prefixes"),
           couch_config:get("xo_auth", "illegal_username_prepend")} of
         {undefined, undefined} ->
             Username;
         {_, undefined} ->
             throw(illegal_prefixes_specified_but_no_prepend);
-        {Prefixes, Prepend} ->
+        {PrefixesString, Prepend} ->
+            Prefixes = string:tokens(PrefixesString, ","),
             case lists:any(fun(Prefix) ->
                                    string:str(Username, Prefix) =:= 1
                            end,
                            Prefixes) of
                 true ->
-                    Prepend ++ Username;
+                    PrependedUsername = Prepend ++ Username,
+                    ?LOG_DEBUG("Illegal username ~p: prepending. Result: ~p", [Username, PrependedUsername]),
+                    PrependedUsername;
                 false ->
                     Username
             end
