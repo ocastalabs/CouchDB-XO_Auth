@@ -98,7 +98,7 @@ handle_twitter_callback(Req, RequestToken, Verifier) ->
     URL="https://api.twitter.com/oauth/access_token",
     SignedParams = oauth:signed_params("GET", URL, [{"oauth_verifier", Verifier}], {ConsumerKey, ConsumerSecret, hmac_sha1}, RequestToken, RequestTokenSecret),     
     OAuthUrl = oauth:uri(URL, SignedParams),
-    Resp=ibrowse:send_req(OAuthUrl, [], get, []),
+    Resp = ibrowse:send_req(OAuthUrl, [], get, []),
 
     AccessTokenResponse = process_twitter_access_token_response(Resp),
     create_or_update_user(Req, AccessTokenResponse).
@@ -139,7 +139,7 @@ process_twitter_access_token_response(Response) ->
             RequestParams =  mochiweb_util:parse_qs(Body),
             AccessToken = oauth:token(RequestParams),
             AccessTokenSecret = oauth:token_secret(RequestParams),
-            ScreenName = screen_name(RequestParams),
+            ScreenName = xo_auth:apply_username_restrictions(screen_name(RequestParams)),
             UserID = user_id(RequestParams),
             {ok, AccessToken, AccessTokenSecret, ScreenName, UserID};
                 

@@ -100,7 +100,8 @@ process_facebook_graphme_response(Resp) ->
                            FBUsername ->
                                ?b2l(FBUsername)
                        end,
-            {ok, ID, Username};
+            WithRestrictions = xo_auth:apply_username_restrictions(Username),
+            {ok, ID, WithRestrictions};
         _ ->
             throw(non_200_from_graphme)
     end.

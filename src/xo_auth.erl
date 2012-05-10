@@ -6,6 +6,7 @@
          update_service_details/4, 
          update_service_details/5]).
 -export([extract_config_values/2]).
+-export([apply_username_restrictions/1]).
 
 -include_lib("couch/include/couch_db.hrl").
 -include("xo_auth.hrl").
@@ -257,4 +258,23 @@ get_username_from_request(#httpd{ user_ctx=UserCtx }) ->
             ?b2l(Username);
         _ ->
             undefined
+    end.
+
+apply_username_restrictions(Username) ->
+    case {couch_config:get("xo_auth", "illegal_username_prefixes"),
+          couch_config:get("xo_auth", "illegal_username_prepend")} of
+        {undefined, undefined} ->
+            Username;
+        {_, undefined} ->
+            throw(illegal_prefixes_specified_but_no_prepend);
+        {Prefixes, Prepend} ->
+            case lists:any(fun(Prefix) ->
+                                   string:str(Username, Prefix) =:= 1
+                           end,
+                           Prefixes) of
+                true ->
+                    Prepend ++ Username;
+                false ->
+                    Username
+            end
     end.
