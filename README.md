@@ -61,17 +61,17 @@ the access token and secret allows server components to access Twitter on the us
 Build
 --------------------
 
-There is an unsophisticated Makefile with targets _compile_ and _install_. 
+This project uses Rebar (https://github.com/basho/rebar) as a build tool. Please refer to https://github.com/basho/rebar/wiki for more information. There is also a Makefile that is 
+based on rebar. To build the application, type:
 
-In order to compile and install this module you might have to edit the Makefile and change one or more of _COUCH\_ROOT_, _\_COUCHDB\_ERLANG\_LIB_, _COUCHDB\_LOCALD_ and _COUCHDB\_INIT\_SCRIPT_ values to point to the appropriate directories and file within your couchdb installation.
-
+$ make
 
 Installation
 -------------------
 
 You need to:
 
-* Copy the beam files to somewhere where couch can find it. That location could be something like couchdb/erlang/lib/couch-1.2/ebin/ depending on where/how you've installed couch.
+* Copy or symlink the application to your couchdb erlang installation, e.g. couchdb/erlang/lib/ depending on where/how you've installed couch. CouchDB will pick up all the applications in the lib directory.
 
 * Optionally create a [Facebook app](See http://developer.facebook.com)
 
@@ -83,7 +83,7 @@ Facebook Configuration
 To add Facebook authentication the following entries are required in the xo_auth.ini file
 
           [httpd_global_handlers]
-          _fb = {fb_auth, handle_fb_req}
+          _fb = {xo_auth_fb, handle_fb_req}
  
           [fb]
           client_id=1234567890
@@ -130,7 +130,7 @@ Twitter Configuration
 To add Twitter authentication the following entries are required in the xo_auth.ini file
 
           [httpd_global_handlers]
-          _twitter = {twitter_auth, handle_twitter_req}
+          _twitter = {xo_auth_twitter, handle_twitter_req}
  
           [twitter]
           client_id=1234567890

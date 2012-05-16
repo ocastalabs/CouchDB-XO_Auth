@@ -1,0 +1,4 @@
+*.beam
+deps/
+.eunit/
+ebin/xo_auth.app
