@@ -109,6 +109,8 @@ create_user_skeleton(UsernamePrototype) ->
     Db = open_auth_db(),
     try 
 
+        {A1,A2,A3} = now(),
+        random:seed(A1, A2, A3),
         Username = get_unused_name(Db, TrimmedName),
         ?LOG_DEBUG("Creating user skeleton for username ~p", [Username]),
 
