@@ -15,6 +15,8 @@ It consists of a CouchDB httpd\_global\_handlers that responds to http GET reque
 
 An error during login will return HTTP 403 to the original caller. 
 
+This version also supports adding Facebook or Twitter login to existing CouchDB user accounts. If HTTP requests to CouchDB made during the external authentication redirection flow contain either an active CouchDB session cookie or the appropriate OAuth headers then the access token/secret received from Twitter or Facebook will be stored in the _user document related to the authenticated user.
+
 Example Facebook Authentication Flow of Control
 ---------------------------
  
@@ -170,6 +172,15 @@ To add Twitter authentication the following entries are required in the xo_auth.
 **blowfish** The Twitter Authentication module uses Blowfish to encrypt a temporary cookie. Blowfish was chosen over AES
 because the Erlang crypto module in Ubuntu 10.04 doesn't support AES. _key_ is an arbitaty value upto 56 bytes in length, but must also be a multiple of 8 bytes, _ivec_ is an arbitary 64 bit value (8 bytes)
 
+Username control
+----------------
+          [xo_auth]
+          illegal_username_prefixes=foo,bar
+          illegal_username_prepend=prefix
+
+This configuration provides limited control over the automatic username generation. If generated usernames start with any of the prefixes in *illegal_username_prefixes* then the generated username will be prefixed with *illegal_username_prepend*
+
+
 Notes
 ---------------
 
@@ -190,6 +201,7 @@ The users ID on the external system and the access token are stored in the user 
     }
 
 Adding a section to an existing user document that contains the *facebook* section with the ID and a blank access_token would allow that user to be authenticated via Facebook.
+
 
 
 License
