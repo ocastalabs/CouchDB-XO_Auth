@@ -73,7 +73,7 @@ Installation
 
 You need to:
 
-* Copy or symlink the application to your couchdb erlang installation, e.g. couchdb/erlang/lib/ depending on where/how you've installed couch. CouchDB will pick up all the applications in the lib directory.
+* Copy or symlink the CouchDB-XO\_Auth directory to your couchdb erlang installation, e.g. *couchdb/erlang/lib/xo_auth* depending on where/how you've installed couch. CouchDB will pick up all the applications in the lib directory.
 
 * Optionally create a [Facebook app](See http://developer.facebook.com)
 
