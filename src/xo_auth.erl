@@ -232,16 +232,17 @@ get_xo_ddoc() ->
     {ok, couch_doc:from_json_obj(Json)}.
 
 query_xref_view(Db, StartKey, EndKey) ->
-    {ok, View, _} = couch_view:get_map_view(Db, ?XO_DDOC_ID, ?XREF_VIEW_NAME, nil),
-    FoldlFun = fun({_Key_DocId, Value}, _, Acc) ->
-                       {ok, [Value | Acc]}
-               end,
     ViewOptions = [
                    {start_key, {StartKey, ?MIN_STR}},
                    {end_key, {EndKey, ?MAX_STR}}
                   ],
-
-    {ok, _, Result} = couch_view:fold(View, FoldlFun, [], ViewOptions),
+    Callback = fun({row, Row}, Acc) ->
+            {ok, [couch_util:get_value(value, Row) | Acc]};
+        (_, Acc) ->
+            {ok, Acc}
+    end,
+    {ok, Result} = couch_mrview:query_view(
+        Db, ?XO_DDOC_ID, ?XREF_VIEW_NAME, ViewOptions, Callback, []),
     Result.
 
 
