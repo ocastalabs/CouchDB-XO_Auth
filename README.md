@@ -3,7 +3,7 @@ External OAuth Authentication for CouchDB
 
 This is a rewrite of the couchdb-facebook authentication module in a more generic manner allowing other systems (e.g. Twitter) to be easily added. In addition the code is designed to utilise the _\_users_ database in a similar manner to the CouchDB 1.2 OAuth code allowing a single user to be authenticated in a number of different ways. Because of this change, this code is NOT COMPATIBLE with the couchdb-facebook code.
 
-This version has been tested against CouchDB 1.2.x
+This version has been tested against CouchDB 1.3.0. This version will not work with earlier versions
 
 This version supports authenticating users using:
  
