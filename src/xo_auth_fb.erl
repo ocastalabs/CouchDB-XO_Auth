@@ -60,16 +60,16 @@ handle_fb_code(Req, FBCode) ->
             couch_httpd:send_json(Req, 403, [], {[{error, <<"Could not get access token">>}]})
     end.
 
-create_or_update_user(Req, ClientID, ClientSecret, AccessToken, {ok, FacebookUserID, FBUsername}) ->
+create_or_update_user(Req, ClientID, ClientSecret, AccessToken, {ok, FacebookUserID, FBUsername, FBInfo}) ->
     Username = xo_auth:determine_username(Req, "facebook", FacebookUserID, FBUsername),
 
     %% Extend the token if its will be stored
     ok = case couch_config:get("fb", "store_access_token", "false") of
              "true" ->
                  {ok, NewToken} = request_access_token_extension(ClientID, ClientSecret, AccessToken),
-                 xo_auth:update_service_details(Username, "facebook", FacebookUserID, NewToken);
+                 xo_auth:update_service_details(Username, "facebook", FacebookUserID, NewToken, [], FBInfo);
              _ ->
-                 xo_auth:update_service_details(Username, "facebook", FacebookUserID, [])
+                 xo_auth:update_service_details(Username, "facebook", FacebookUserID, [], [], FBInfo)
          end,
                  
     RedirectUri = couch_config:get("fb", "client_app_uri", nil),
@@ -101,7 +101,7 @@ process_facebook_graphme_response(Resp) ->
                                ?b2l(FBUsername)
                        end,
             WithRestrictions = xo_auth:apply_username_restrictions(Username),
-            {ok, ID, WithRestrictions};
+            {ok, ID, WithRestrictions, {FBInfo}};
         _ ->
             throw(non_200_from_graphme)
     end.
