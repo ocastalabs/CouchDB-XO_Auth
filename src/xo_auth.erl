@@ -2,9 +2,10 @@
 
 -export([generate_cookied_response_json/3]).
 -export([determine_username/4]).
--export([update_service_details/3, 
-         update_service_details/4, 
-         update_service_details/5]).
+-export([update_service_details/3,
+         update_service_details/4,
+         update_service_details/5,
+         update_service_details/6]).
 -export([extract_config_values/2]).
 -export([apply_username_restrictions/1]).
 
@@ -15,6 +16,7 @@
 -define(XREF_VIEW_NAME, <<"xrefbyid">>).
 -define(ACCESS_TOKEN, <<"access_token">>).
 -define(ACCESS_TOKEN_SECRET, <<"access_token_secret">>).
+-define(EXTRA_INFO, <<"me">>).
 -define(replace(L, K, V), lists:keystore(K, 1, L, {K, V})).
 
 %% Exported functions
@@ -147,6 +149,9 @@ update_service_details(Username, ServiceName, ServiceUserID, AccessToken) ->
     update_service_details(Username, ServiceName, ServiceUserID, AccessToken, []).
 
 update_service_details(Username, ServiceName, ServiceUserID, AccessToken, AccessTokenSecret) ->
+    update_service_details(Username, ServiceName, ServiceUserID, AccessToken, AccessTokenSecret, []).
+
+update_service_details(Username, ServiceName, ServiceUserID, AccessToken, AccessTokenSecret, ExtraInfo) ->
     Db = open_auth_db(),
     DocID = "org.couchdb.user:" ++ Username,
 
@@ -166,7 +171,8 @@ update_service_details(Username, ServiceName, ServiceUserID, AccessToken, Access
                                                end,
                                                ServiceDetails,
                                                [{?ACCESS_TOKEN, ?l2b(AccessToken)},
-                                                {?ACCESS_TOKEN_SECRET, ?l2b(AccessTokenSecret)}])},
+                                                {?ACCESS_TOKEN_SECRET, ?l2b(AccessTokenSecret)},
+                                                {?EXTRA_INFO, ExtraInfo}])},
 
                 NewDocBody = ?replace(DocBody, ?l2b(ServiceName), ServiceDetails1),
                 ?LOG_DEBUG("Updated Body: ~p", [NewDocBody]),
