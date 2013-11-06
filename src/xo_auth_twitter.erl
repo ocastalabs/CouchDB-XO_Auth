@@ -56,7 +56,7 @@ request_twitter_request_token(Req) ->
         xo_auth:extract_config_values("twitter", ["redirect_uri", "consumer_key", "consumer_secret"]),
     
     Url = "https://api.twitter.com/oauth/request_token",
-    SignedParams = oauth:signed_params("GET", Url, [{"oauth_callback", CallbackUrl}], {ConsumerKey, ConsumerSecret, hmac_sha1}, "", ""),     
+    SignedParams = oauth:sign("GET", Url, [{"oauth_callback", CallbackUrl}], {ConsumerKey, ConsumerSecret, hmac_sha1}, "", ""),     
     OAuthUrl = oauth:uri(Url, SignedParams),
     Resp = ibrowse:send_req(OAuthUrl, [], get, []),
 
@@ -96,7 +96,7 @@ handle_twitter_callback(Req, RequestToken, Verifier) ->
     ?LOG_DEBUG("Requesting Access Token with ConsumerKey: ~p  ConsumerSecret: ~p", [ConsumerKey, ConsumerSecret]),
     
     URL="https://api.twitter.com/oauth/access_token",
-    SignedParams = oauth:signed_params("GET", URL, [{"oauth_verifier", Verifier}], {ConsumerKey, ConsumerSecret, hmac_sha1}, RequestToken, RequestTokenSecret),     
+    SignedParams = oauth:sign("GET", URL, [{"oauth_verifier", Verifier}], {ConsumerKey, ConsumerSecret, hmac_sha1}, RequestToken, RequestTokenSecret),     
     OAuthUrl = oauth:uri(URL, SignedParams),
     Resp = ibrowse:send_req(OAuthUrl, [], get, []),
 
