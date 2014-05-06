@@ -77,7 +77,7 @@ create_or_update_user(Req, ClientID, ClientSecret, AccessToken, {ok, FacebookUse
 
 request_facebook_graphme_info(AccessToken) ->
     %% Construct the URL to access the graph API's /me page
-    Url="https://graph.facebook.com/me?fields=id,username,name&access_token="++AccessToken,
+    Url="https://graph.facebook.com/me?fields=id,name&access_token="++AccessToken,
     ?LOG_DEBUG("Url=~p",[Url]),
 
     %% Request the page
