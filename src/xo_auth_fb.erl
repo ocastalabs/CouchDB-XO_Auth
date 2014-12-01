@@ -24,6 +24,7 @@ handle_fb_req(#httpd{method='GET'}=Req) ->
 
                         GraphmeResponse = request_facebook_graphme_info(AccessToken),
                         create_or_update_user(Req, ClientID, ClientSecret, AccessToken, GraphmeResponse);
+                end
             Code -> 
                 handle_fb_code(Req, Code)
         end
