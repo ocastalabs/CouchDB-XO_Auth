@@ -14,8 +14,16 @@ handle_fb_req(#httpd{method='GET'}=Req) ->
         %% Did we get a 'code' or 'error' back from facebook?
         case couch_httpd:qs_value(Req, "code") of
             undefined ->
-                ?LOG_DEBUG("Facebook responded with something other than a code: ~p", [Req]),
-                couch_httpd:send_json(Req, 403, [], {[{error, <<"No code supplied">>}]});
+                case couch_httpd:qs_value(Req, "accessToken") of
+                    undefined ->
+                        ?LOG_DEBUG("Facebook responded with something other than a code: ~p", [Req]),
+                        couch_httpd:send_json(Req, 403, [], {[{error, <<"No code supplied">>}]});
+                    AccessToken ->
+                        [RedirectURI, ClientID, ClientSecret] = 
+                            xo_auth:extract_config_values("fb", ["redirect_uri", "client_id", "client_secret"]),
+
+                        GraphmeResponse = request_facebook_graphme_info(AccessToken),
+                        create_or_update_user(Req, ClientID, ClientSecret, AccessToken, GraphmeResponse);
             Code -> 
                 handle_fb_code(Req, Code)
         end
