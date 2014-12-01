@@ -23,7 +23,7 @@ handle_fb_req(#httpd{method='GET'}=Req) ->
                             xo_auth:extract_config_values("fb", ["redirect_uri", "client_id", "client_secret"]),
 
                         GraphmeResponse = request_facebook_graphme_info(AccessToken),
-                        create_or_update_user(Req, ClientID, ClientSecret, AccessToken, GraphmeResponse);
+                        create_or_update_user(Req, ClientID, ClientSecret, AccessToken, GraphmeResponse)
                 end;
             Code -> 
                 handle_fb_code(Req, Code)
