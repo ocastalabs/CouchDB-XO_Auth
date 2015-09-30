@@ -170,7 +170,7 @@ To add Twitter authentication the following entries are required in the xo_auth.
 
 
 **blowfish** The Twitter Authentication module uses Blowfish to encrypt a temporary cookie. Blowfish was chosen over AES
-because the Erlang crypto module in Ubuntu 10.04 doesn't support AES. _key_ is an arbitaty value upto 56 bytes in length, but must also be a multiple of 8 bytes, _ivec_ is an arbitary 64 bit value (8 bytes)
+because the Erlang crypto module in Ubuntu 10.04 doesn't support AES. _key_ is an arbitaty value upto 56 bytes in length, but must also be a multiple of 8 bytes, _ivec_ is an arbitrary 64 bit value (8 bytes)
 
 Username control
 ----------------
